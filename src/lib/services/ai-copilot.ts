@@ -7,6 +7,16 @@ export interface EvidenceAnchor {
   proof: string;
 }
 
+export interface GroqInferenceMetadata {
+  model: string;
+  provider: 'groq' | 'deterministic';
+  latencyMs: number;
+  totalTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  queueTimeSec?: number;
+}
+
 export interface ForensicDossierResult {
   clusterId: string;
   caseReference: string;
@@ -27,6 +37,7 @@ export interface ForensicDossierResult {
   };
   nfiuNarrative: string;
   generatedTimestamp: string;
+  groqMetadata?: GroqInferenceMetadata;
 }
 
 export interface AiCopilotConfig {

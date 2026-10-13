@@ -10,7 +10,9 @@ import { TelemetryService, IpTelemetryData, IP_TELEMETRY_PRESETS } from '@/lib/s
 import { FinacleCoreConnector, FinacleResponseEnvelope } from '@/lib/services/finacle-envelope';
 import { NfiuConnectClient, NfiuSubmissionPackage, NfiuSubmissionReceipt } from '@/lib/services/nfiu-connect';
 import { GoAmlReportGenerator } from '@/lib/services/goaml-generator';
-import { AiCopilotService, ForensicDossierResult } from '@/lib/services/ai-copilot';
+import { ForensicDossierResult } from '@/lib/services/ai-copilot';
+import { GroqForensicService } from '@/lib/services/groq-service';
+import { GroqDossierModal } from '@/components/workbench/GroqDossierModal';
 import { Iso20022Parser } from '@/lib/graph-engine/iso20022-parser';
 import { CsvTransactionParser } from '@/lib/graph-engine/csv-parser';
 import { FrozenAccountRecord, AuditLogEntry } from '@/lib/storage/investigation-store';
@@ -48,6 +50,7 @@ import {
   ChevronRight,
   Shuffle,
   Eye,
+  Cpu,
 } from 'lucide-react';
 
 export type PortalTab =
@@ -120,9 +123,10 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
   const [isTransmittingNfiu, setIsTransmittingNfiu] = useState<boolean>(false);
   const [xmlCopied, setXmlCopied] = useState<boolean>(false);
 
-  // AI Copilot Grounded Synthesis
+  // Groq LPU AI Copilot Grounded Synthesis
   const [isSynthesizingAi, setIsSynthesizingAi] = useState<boolean>(false);
   const [aiDossier, setAiDossier] = useState<ForensicDossierResult | null>(null);
+  const [isGroqModalOpen, setIsGroqModalOpen] = useState<boolean>(false);
 
   // Ingestion State
   const [ingestTab, setIngestTab] = useState<'iso20022' | 'csv'>('iso20022');
@@ -416,28 +420,29 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
     }
   };
 
-  // Grounded Gemini AI Copilot Synthesis
+  // Grounded Groq LPU AI Copilot Synthesis
   const handleSynthesizeAi = async () => {
     const targetCluster = selectedCluster || clusters[0];
     if (!targetCluster) return;
 
     setIsSynthesizingAi(true);
     try {
-      const result = await AiCopilotService.synthesizeDossier({
+      const result = await GroqForensicService.synthesizeDossier({
         cluster: targetCluster,
         nodes,
         edges,
       });
       setAiDossier(result);
+      setIsGroqModalOpen(true);
 
       await SupabaseDbService.logAuditAction({
         action: 'SAR_EXPORT',
         targetEntityId: targetCluster.code,
         officerId: 'ZENITH_AML_INVESTIGATOR_L2',
-        details: `AI Forensic Dossier generated for cluster ${targetCluster.code} (${result.title})`,
+        details: `Groq LPU Forensic Dossier synthesized for cluster ${targetCluster.code} (${result.title}) using ${result.groqMetadata?.model || 'openai/gpt-oss-120b'} in ${result.groqMetadata?.latencyMs}ms`,
       });
     } catch (err) {
-      console.warn('AI copilot error:', err);
+      console.warn('Groq AI copilot error:', err);
     } finally {
       setIsSynthesizingAi(false);
     }
@@ -1022,8 +1027,8 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                       disabled={isSynthesizingAi}
                       className="text-xs border-amber-500/40 text-amber-400 hover:bg-amber-500/10 gap-1.5"
                     >
-                      <Sparkles className="size-3.5" />
-                      <span>{isSynthesizingAi ? 'Synthesizing...' : 'Gemini AI Dossier'}</span>
+                      <Sparkles className="size-3.5 text-amber-400" />
+                      <span>{isSynthesizingAi ? 'Synthesizing with Groq LPU...' : 'Groq AI Dossier'}</span>
                     </Button>
                   )}
                   {selectedNode && !frozenAccountIdsSet.has(selectedNode.id) && (
@@ -1179,18 +1184,32 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                       </div>
                     )}
 
-                    {/* AI Copilot grounded response if synthesized */}
+                    {/* Groq LPU AI Copilot grounded response if synthesized */}
                     {aiDossier && (
                       <div className="mt-4 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-2">
-                        <div className="flex items-center gap-1.5 text-xs font-mono text-amber-400 font-bold">
-                          <Sparkles className="size-3.5" />
-                          <span>{aiDossier.title}</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-mono text-amber-400 font-bold">
+                            <Sparkles className="size-3.5" />
+                            <span>{aiDossier.title}</span>
+                          </div>
+                          {aiDossier.groqMetadata && (
+                            <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                              <Cpu className="size-3" /> {aiDossier.groqMetadata.latencyMs}ms
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
+                        <p className="text-[11px] text-slate-300 leading-relaxed font-sans line-clamp-3">
                           {aiDossier.executiveSummary}
                         </p>
-                        <div className="text-[10px] font-mono text-slate-400 border-t border-amber-500/20 pt-1">
-                          Regulatory Code: {aiDossier.cbnRegulationCode} | Confidence: {aiDossier.confidenceScore}%
+                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 border-t border-amber-500/20 pt-1.5">
+                          <span>Confidence: {aiDossier.confidenceScore}%</span>
+                          <button
+                            type="button"
+                            onClick={() => setIsGroqModalOpen(true)}
+                            className="text-[10px] text-amber-400 hover:text-amber-300 font-mono font-bold hover:underline cursor-pointer"
+                          >
+                            View Full Dossier →
+                          </button>
                         </div>
                       </div>
                     )}
@@ -2087,6 +2106,24 @@ TX-CSV-103,2026-10-13T12:10:00Z,2081940319,2081940192,14600000,NIP,CIRCULAR CLOS
           )}
         </main>
       </div>
+
+      {/* Groq LPU Forensic Intelligence Dossier Modal */}
+      <GroqDossierModal
+        isOpen={isGroqModalOpen}
+        onClose={() => setIsGroqModalOpen(false)}
+        dossier={aiDossier}
+        isSynthesizing={isSynthesizingAi}
+        onRegenerate={handleSynthesizeAi}
+        onSelectNode={(nodeId) => {
+          const found = nodes.find((n) => n.id === nodeId);
+          if (found) setSelectedNode(found);
+        }}
+        onExecutePnd={async (accountIds) => {
+          for (const acc of accountIds) {
+            await handleExecutePndFreeze(acc);
+          }
+        }}
+      />
     </div>
   );
 };

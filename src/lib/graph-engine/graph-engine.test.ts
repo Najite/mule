@@ -360,3 +360,37 @@ describe('CrossBankConsortiumService: NIBSS & Device Telemetry Correlation', () 
   });
 });
 
+describe('GroqForensicService: High-Speed LPU AML Dossier Synthesizer', () => {
+  it('should synthesize a grounded forensic AML dossier with evidence anchors and Finacle directive', async () => {
+    const { GroqForensicService } = await import('../services/groq-service');
+    const { SAMPLE_DATASETS } = await import('./sample-datasets');
+    const { GraphDetectionEngine } = await import('./algorithms');
+
+    const dataset = SAMPLE_DATASETS.find((d) => d.id === 'apex-syndicate');
+    expect(dataset).toBeDefined();
+
+    const analysis = GraphDetectionEngine.analyzeTransactions(dataset!.records);
+    expect(analysis.clusters.length).toBeGreaterThan(0);
+
+    const cluster = analysis.clusters[0];
+    const dossier = await GroqForensicService.synthesizeDossier({
+      cluster,
+      nodes: analysis.nodes,
+      edges: analysis.edges,
+    });
+
+    expect(dossier).toBeDefined();
+    expect(dossier.clusterId).toBe(cluster.id);
+    expect(dossier.cbnRegulationCode).toBe('CBN/AML-CFT/SEC-6/2022');
+    expect(dossier.executiveSummary).toBeTruthy();
+    expect(dossier.topologicalProof).toBeTruthy();
+    expect(dossier.nfiuNarrative).toContain('Zenith Bank');
+    expect(dossier.finacleFreezeDirective.reasonCode).toBe('08');
+    expect(dossier.finacleFreezeDirective.targetAccounts.length).toBeGreaterThan(0);
+    expect(dossier.anchors.length).toBeGreaterThan(0);
+    expect(dossier.groqMetadata).toBeDefined();
+    expect(dossier.groqMetadata?.provider).toBe('groq');
+    expect(dossier.groqMetadata?.latencyMs).toBeGreaterThanOrEqual(0);
+  }, 15000);
+});
+

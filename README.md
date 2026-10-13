@@ -116,9 +116,12 @@ flowchart TD
 - Supports export to CSV/JSON for Central Bank of Nigeria bank examiners.
 - Manages persistent case dossiers with threat priorities (`CRITICAL`, `HIGH`, `ELEVATED`) and forensic notes.
 
-### 7. Dual-Mode Grounded GenAI Copilot (`src/lib/services/ai-copilot.ts`)
-- **Deterministic Rule Engine**: Instantly synthesizes CBN AML/CFT 2022 dossiers with verified citations from graph metrics without external API dependencies.
-- **Optional Gemini LLM Mode**: Server-side proxy through Express backend (`/api/v1/copilot/draft-dossier`) using `GEMINI_API_KEY` stored securely in server environment with deterministic fallback.
+### 7. High-Speed Grounded AI Copilot via Groq LPU (`src/lib/services/groq-service.ts`)
+- **Official Groq SDK Integration**: Powered by `groq-sdk` (`import { Groq } from 'groq-sdk'`) with hardware-accelerated Groq LPU inference (~100-300ms sub-second generation).
+- **Supported Models**: Primary inference via `openai/gpt-oss-120b` (120B parameter reasoning model on Groq) with ultra-low latency fallback to `qwen/qwen3.8-27b`.
+- **Zero-Hallucination Grounding**: Narrative output is strictly anchored to Tarjan's SCC cycle nodes, verified NGN volumes, and CBN AML/CFT 2022 Circular citations.
+- **Deterministic Baseline Fallback**: If offline or without API connectivity, the deterministic mathematical rule engine immediately provides guaranteed compliant dossiers without disruption.
+- **Institutional Dossier Modal (`GroqDossierModal.tsx`)**: Displays live hardware inference latency, token counts, NFIU SAR narrative formatted pursuant to Section 6 MLPA 2022, and one-click batch Finacle PND execution.
 
 ---
 

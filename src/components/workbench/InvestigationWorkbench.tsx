@@ -7,8 +7,10 @@ import { TransactionRecord, EntityNode, SyndicateCluster } from '@/lib/graph-eng
 import { ForceGraphCanvas } from '@/components/graph/ForceGraphCanvas';
 import { LiveVerificationModal } from './LiveVerificationModal';
 import { AuditLedgerModal } from './AuditLedgerModal';
+import { GroqDossierModal } from './GroqDossierModal';
 import { GoAmlReportGenerator } from '@/lib/services/goaml-generator';
-import { AiCopilotService, ForensicDossierResult } from '@/lib/services/ai-copilot';
+import { ForensicDossierResult } from '@/lib/services/ai-copilot';
+import { GroqForensicService } from '@/lib/services/groq-service';
 import {
   FinacleCoreConnector,
   FinacleFreezeRequest,
@@ -71,9 +73,10 @@ export const InvestigationWorkbench: React.FC = () => {
   const [finacleHostResponse, setFinacleHostResponse] = useState<FinacleResponseEnvelope | null>(null);
   const [finacleCopied, setFinacleCopied] = useState<boolean>(false);
 
-  // Grounded GenAI Copilot State
+  // Grounded Groq LPU AI Copilot State
   const [aiDossier, setAiDossier] = useState<ForensicDossierResult | null>(null);
   const [isSynthesizingAi, setIsSynthesizingAi] = useState(false);
+  const [groqModalOpen, setGroqModalOpen] = useState(false);
 
   // goAML XML & NFIU B2B Submission State
   const [goAmlModalOpen, setGoAmlModalOpen] = useState(false);
@@ -148,11 +151,11 @@ export const InvestigationWorkbench: React.FC = () => {
     }
   }, [detectionResults, selectedCluster, selectedNode]);
 
-  // Auto-synthesize initial AI dossier when cluster changes
+  // Auto-synthesize initial Groq AI dossier when cluster changes
   useEffect(() => {
     const targetCluster = selectedCluster || detectionResults.clusters[0];
     if (targetCluster && !aiDossier) {
-      AiCopilotService.synthesizeDossier({
+      GroqForensicService.synthesizeDossier({
         cluster: targetCluster,
         nodes: detectionResults.nodes,
         edges: detectionResults.edges,
@@ -263,13 +266,13 @@ export const InvestigationWorkbench: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Handle Manual AI Dossier Generation
+  // Handle Manual Groq AI Dossier Generation
   const handleSynthesizeAiDossier = async () => {
     const targetCluster = selectedCluster || detectionResults.clusters[0];
     if (!targetCluster) return;
     setIsSynthesizingAi(true);
     try {
-      const res = await AiCopilotService.synthesizeDossier({
+      const res = await GroqForensicService.synthesizeDossier({
         cluster: targetCluster,
         nodes: detectionResults.nodes,
         edges: detectionResults.edges,
@@ -768,23 +771,43 @@ export const InvestigationWorkbench: React.FC = () => {
                 </button>
               </div>
 
-              {/* TAB 1: Grounded GenAI Forensic Copilot */}
+              {/* TAB 1: Grounded Groq LPU Forensic Copilot */}
               {inspectorTab === 'ai' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-mono uppercase text-text-muted font-semibold flex items-center gap-1">
                       <Sparkles className="size-3 text-signal" />
-                      Grounded AI Forensic Briefing
+                      Groq LPU Forensic Briefing
                     </span>
-                    <button
-                      type="button"
-                      onClick={handleSynthesizeAiDossier}
-                      disabled={isSynthesizingAi}
-                      className="text-[11px] font-mono text-signal hover:underline disabled:opacity-50"
-                    >
-                      {isSynthesizingAi ? 'Synthesizing...' : 'Regenerate'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setGroqModalOpen(true)}
+                        className="text-[10px] font-mono text-emerald-400 hover:underline flex items-center gap-1 font-bold"
+                      >
+                        <Cpu className="size-3" /> Full Dossier →
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSynthesizeAiDossier}
+                        disabled={isSynthesizingAi}
+                        className="text-[11px] font-mono text-signal hover:underline disabled:opacity-50"
+                      >
+                        {isSynthesizingAi ? 'Synthesizing...' : 'Regenerate'}
+                      </button>
+                    </div>
                   </div>
+
+                  {aiDossier?.groqMetadata && (
+                    <div className="flex items-center justify-between px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-mono">
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <Cpu className="size-3" /> Groq LPU Accelerated
+                      </span>
+                      <span className="text-slate-400">
+                        {aiDossier.groqMetadata.latencyMs}ms | {aiDossier.groqMetadata.model.split('/').pop()}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="bg-canvas p-3 rounded-xl border border-border-subtle text-text-secondary text-xs leading-relaxed max-h-48 overflow-y-auto space-y-2">
                     <p className="text-text-primary font-medium">
@@ -1394,6 +1417,27 @@ export const InvestigationWorkbench: React.FC = () => {
           refreshAuditCount();
         }}
         currentCluster={selectedCluster}
+      />
+
+      {/* Groq LPU Forensic Intelligence Dossier Modal */}
+      <GroqDossierModal
+        isOpen={groqModalOpen}
+        onClose={() => setGroqModalOpen(false)}
+        dossier={aiDossier}
+        isSynthesizing={isSynthesizingAi}
+        onRegenerate={handleSynthesizeAiDossier}
+        onSelectNode={(nodeId) => {
+          const found = detectionResults.nodes.find((n) => n.id === nodeId);
+          if (found) handleSelectNode(found);
+        }}
+        onExecutePnd={(accountIds) => {
+          setFrozenAccountIds((prev) => {
+            const next = new Set(prev);
+            accountIds.forEach((id) => next.add(id));
+            return next;
+          });
+          setPndStatus(`Targeted Finacle PND freeze applied to ${accountIds.length} syndicate accounts.`);
+        }}
       />
     </section>
   );
