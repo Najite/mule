@@ -6,6 +6,7 @@ import { Iso20022Parser } from '@/lib/graph-engine/iso20022-parser';
 import { TransactionRecord, EntityNode, SyndicateCluster } from '@/lib/graph-engine/types';
 import { ForceGraphCanvas } from '@/components/graph/ForceGraphCanvas';
 import { LiveVerificationModal } from './LiveVerificationModal';
+import { AuditLedgerModal } from './AuditLedgerModal';
 import { GoAmlReportGenerator } from '@/lib/services/goaml-generator';
 import { AiCopilotService, ForensicDossierResult } from '@/lib/services/ai-copilot';
 import {
@@ -23,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   ShieldAlert,
+  ShieldCheck,
   Play,
   RotateCcw,
   Upload,
@@ -100,6 +102,14 @@ export const InvestigationWorkbench: React.FC = () => {
   const verifyInitialAccount = '2081940192';
   const verifyInitialBank = '057';
   const verifyInitialIp = '102.89.43.12';
+
+  // Audit Ledger & Case Management Modal State
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [auditLogCount, setAuditLogCount] = useState<number>(0);
+
+  const refreshAuditCount = () => {
+    investigationStore.getAuditTrail().then((logs) => setAuditLogCount(logs.length));
+  };
 
   // Switch dataset handler
   const handleSelectDataset = (id: string) => {
@@ -228,6 +238,7 @@ export const InvestigationWorkbench: React.FC = () => {
       details: `Ingested ${records.length} pacs.008 interbank clearing records`,
       officerId: 'ZENITH_AML_INVESTIGATOR_L2',
     });
+    refreshAuditCount();
     setPndStatus(`Loaded ${records.length} ISO 20022 clearing records into bipartite graph.`);
   };
 
@@ -270,13 +281,14 @@ export const InvestigationWorkbench: React.FC = () => {
     }
   };
 
-  // Restore persisted PND frozen accounts on mount from IndexedDB
+  // Restore persisted PND frozen accounts and audit count on mount from IndexedDB
   useEffect(() => {
     investigationStore.getAllFrozenAccounts().then((records) => {
       if (records.length > 0) {
         setFrozenAccountIds(new Set(records.map((r) => r.accountId)));
       }
     });
+    refreshAuditCount();
   }, []);
 
   // Handle Finacle PND Trigger Simulation & State Mutation
@@ -317,6 +329,7 @@ export const InvestigationWorkbench: React.FC = () => {
         officerId: 'ZENITH_AML_INVESTIGATOR_L2',
       });
     });
+    refreshAuditCount();
 
     // Generate Official Infosys Finacle FI XML SOAP Request
     const freezeReq: FinacleFreezeRequest = {
@@ -372,6 +385,7 @@ export const InvestigationWorkbench: React.FC = () => {
       details: 'PND restriction lifted by compliance officer',
       officerId: 'ZENITH_AML_INVESTIGATOR_L2',
     });
+    refreshAuditCount();
     setPndStatus(`Finacle Core API: Account ${accountId} PND restriction lifted.`);
   };
 
@@ -392,6 +406,7 @@ export const InvestigationWorkbench: React.FC = () => {
       details: `Generated NFIU goAML XML regulatory filing for cluster ${primaryCluster.name}`,
       officerId: 'ZENITH_AML_INVESTIGATOR_L2',
     });
+    refreshAuditCount();
 
     setCurrentGoAmlXml(xml);
     setNfiuReceipt(null);
@@ -421,6 +436,7 @@ export const InvestigationWorkbench: React.FC = () => {
         details: `Transmitted goAML SAR Package ${pkg.packageId} to NFIU. Batch: ${receipt.nfiuBatchId}, SHA-256: ${pkg.sha256XmlDigest}`,
         officerId: 'ZENITH_AML_INVESTIGATOR_L2',
       });
+      refreshAuditCount();
     } finally {
       setIsTransmittingNfiu(false);
     }
@@ -505,6 +521,23 @@ export const InvestigationWorkbench: React.FC = () => {
             >
               <span className="size-1.5 rounded-full bg-verified animate-pulse" />
               <span>NUBAN & IP Gateway</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                refreshAuditCount();
+                setAuditModalOpen(true);
+              }}
+              className="gap-1.5 text-xs border-border-medium hover:border-signal/40 hover:text-signal"
+            >
+              <ShieldCheck className="size-3.5 text-verified" />
+              <span>Audit Ledger & Cases</span>
+              {auditLogCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-verified/20 text-verified font-bold">
+                  {auditLogCount}
+                </span>
+              )}
             </Button>
             <Button
               variant="outline"
@@ -1351,6 +1384,16 @@ export const InvestigationWorkbench: React.FC = () => {
         initialAccountNumber={verifyInitialAccount}
         initialBankCode={verifyInitialBank}
         initialIp={verifyInitialIp}
+      />
+
+      {/* Regulatory Compliance Audit Ledger & Case Management Modal */}
+      <AuditLedgerModal
+        isOpen={auditModalOpen}
+        onClose={() => {
+          setAuditModalOpen(false);
+          refreshAuditCount();
+        }}
+        currentCluster={selectedCluster}
       />
     </section>
   );

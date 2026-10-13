@@ -148,6 +148,52 @@ class InvestigationStore {
       return [];
     }
   }
+
+  // --- Saved Cases ---
+
+  public async saveCase(caseRecord: SavedCaseRecord): Promise<void> {
+    try {
+      const db = await this.getDB();
+      const tx = db.transaction('savedCases', 'readwrite');
+      tx.objectStore('savedCases').put(caseRecord);
+    } catch (err) {
+      console.warn('InvestigationStore: Failed to save case:', err);
+    }
+  }
+
+  public async getAllSavedCases(): Promise<SavedCaseRecord[]> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('savedCases', 'readonly');
+        const req = tx.objectStore('savedCases').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  public async deleteSavedCase(caseReference: string): Promise<void> {
+    try {
+      const db = await this.getDB();
+      const tx = db.transaction('savedCases', 'readwrite');
+      tx.objectStore('savedCases').delete(caseReference);
+    } catch (err) {
+      console.warn('InvestigationStore: Failed to delete case:', err);
+    }
+  }
+
+  public async clearAuditTrail(): Promise<void> {
+    try {
+      const db = await this.getDB();
+      const tx = db.transaction('auditLogs', 'readwrite');
+      tx.objectStore('auditLogs').clear();
+    } catch (err) {
+      console.warn('InvestigationStore: Failed to clear audit logs:', err);
+    }
+  }
 }
 
 export const investigationStore = new InvestigationStore();

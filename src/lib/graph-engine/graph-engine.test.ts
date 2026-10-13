@@ -277,3 +277,34 @@ describe('NfiuConnectClient: NFIU goAML B2B WebService Package', () => {
   });
 });
 
+describe('Iso20022Parser & Sovereign Telemetry: Boundary & Error Handling', () => {
+  it('should return error when XML has no pacs.008 credit transfer blocks', () => {
+    const result = Iso20022Parser.parsePacs008('<Document><Empty/></Document>');
+    expect(result.error).toBeDefined();
+    expect(result.records.length).toBe(0);
+  });
+
+  it('should resolve Starlink Nigeria (102.165.x.x) as residential broadband with zero egress', () => {
+    const result = SovereignGeoIpService.evaluateIp('102.165.34.19');
+    expect(result.jurisdiction).toBe('NIGERIA');
+    expect(result.asn).toBe('AS14593');
+    expect(result.carrierType).toBe('BROADBAND');
+    expect(result.isVpnOrProxy).toBe(false);
+    expect(result.ndpaSovereigntyCompliant).toBe(true);
+  });
+
+  it('should reject invalid account numbers in Finacle host simulation', () => {
+    const response = FinacleCoreConnector.simulateHostExecution({
+      accountNumber: 'INVALID_ACC',
+      reasonCode: '08',
+      reasonDescription: 'CBN AML/CFT',
+      caseReference: 'CASE-01',
+      initiatorOfficer: 'OFFICER_1',
+    });
+
+    expect(response.status).toBe('INVALID_ACCOUNT');
+    expect(response.responseCode).toBe('14');
+    expect(response.message).toContain('Invalid NUBAN');
+  });
+});
+
