@@ -6,12 +6,14 @@ interface NavbarProps {
   onOpenExplore: () => void;
   onOpenHowItWorks: () => void;
   onOpenBlueprint?: () => void;
+  onLaunchPortal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenExplore,
   onOpenHowItWorks,
   onOpenBlueprint,
+  onLaunchPortal,
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -81,6 +83,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Desktop Header Actions */}
         <div className="hidden sm:flex items-center gap-3">
+          {onLaunchPortal && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onLaunchPortal}
+              className="gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-semibold shadow-md shadow-amber-500/20 border border-amber-400/40"
+            >
+              <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Launch AML Portal</span>
+              <span className="text-[9px] font-mono uppercase bg-slate-950/40 text-amber-200 px-1.5 py-0.2 rounded">
+                Supabase Live
+              </span>
+            </Button>
+          )}
+
           {onOpenBlueprint && (
             <button
               type="button"
@@ -102,10 +119,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             See How It Works
           </Button>
           <Button
-            variant="default"
+            variant="outline"
             size="sm"
             onClick={onOpenExplore}
-            className="gap-1.5"
+            className="gap-1.5 border-border-medium hover:border-signal/40 text-xs"
           >
             <span>Explore FININT</span>
             <ArrowUpRight className="size-3.5" aria-hidden="true" />
@@ -142,6 +159,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             ))}
           </nav>
           <div className="mt-5 pt-4 border-t border-border-subtle flex flex-col gap-2.5">
+            {onLaunchPortal && (
+              <Button
+                variant="default"
+                className="w-full justify-center bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-semibold gap-2"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onLaunchPortal();
+                }}
+              >
+                <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Launch AML Portal (Supabase Live)</span>
+              </Button>
+            )}
             {onOpenBlueprint && (
               <Button
                 variant="outline"

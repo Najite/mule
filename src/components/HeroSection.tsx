@@ -7,12 +7,14 @@ interface HeroSectionProps {
   onOpenExplore: () => void;
   onOpenHowItWorks: () => void;
   onOpenBlueprint?: () => void;
+  onLaunchPortal?: () => void;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({
   onOpenExplore,
   onOpenHowItWorks,
   onOpenBlueprint,
+  onLaunchPortal,
 }) => {
   const [headlineIndex, setHeadlineIndex] = useState(0);
 
@@ -95,15 +97,28 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 
             {/* Dual CTAs (Marketing composition) */}
             <div className="flex flex-wrap items-center gap-4 mb-12">
-              <Button
-                size="lg"
-                variant="default"
-                onClick={onOpenExplore}
-                className="gap-2 text-base font-semibold px-7 shadow-lg shadow-signal/15"
-              >
-                <span>Explore FININT</span>
-                <ArrowRight className="size-4" aria-hidden="true" />
-              </Button>
+              {onLaunchPortal ? (
+                <Button
+                  size="lg"
+                  variant="default"
+                  onClick={onLaunchPortal}
+                  className="gap-2.5 text-base font-semibold px-7 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 shadow-xl shadow-amber-500/25 border border-amber-400/50"
+                >
+                  <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Launch AML Operations Portal</span>
+                  <ArrowRight className="size-4" aria-hidden="true" />
+                </Button>
+              ) : (
+                <Button
+                  size="lg"
+                  variant="default"
+                  onClick={onOpenExplore}
+                  className="gap-2 text-base font-semibold px-7 shadow-lg shadow-signal/15"
+                >
+                  <span>Explore FININT</span>
+                  <ArrowRight className="size-4" aria-hidden="true" />
+                </Button>
+              )}
 
               <Button
                 size="lg"

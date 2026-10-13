@@ -11,8 +11,10 @@ import { DifferentiationSection } from '@/components/DifferentiationSection';
 import { FinalCtaSection } from '@/components/FinalCtaSection';
 import { Footer } from '@/components/Footer';
 import { InvestigationModal } from '@/components/InvestigationModal';
+import { FinintAppPortal } from '@/components/portal/FinintAppPortal';
 
 export const App: React.FC = () => {
+  const [viewMode, setViewMode] = useState<'portal' | 'landing'>('portal');
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'explore' | 'flow' | 'blueprint'>('explore');
 
@@ -31,8 +33,26 @@ export const App: React.FC = () => {
     setModalOpen(true);
   };
 
+  if (viewMode === 'portal') {
+    return <FinintAppPortal onSwitchToLanding={() => setViewMode('landing')} />;
+  }
+
   return (
     <div className="min-h-screen bg-canvas text-text-primary selection:bg-signal selection:text-canvas">
+      {/* Top Banner to Return to AML Portal */}
+      <div className="bg-[#0B0F17] border-b border-[#1E293B] px-4 py-2 text-center text-xs font-mono text-slate-300 flex items-center justify-center gap-3 relative z-50">
+        <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+        <span className="hidden sm:inline">
+          ZENITH BANK & NFIU REGULATORY TIER-1 ENFORCEMENT &bull; SUPABASE CLOUD ACTIVE
+        </span>
+        <button
+          onClick={() => setViewMode('portal')}
+          className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+        >
+          Launch AML Operations Portal &rarr;
+        </button>
+      </div>
+
       {/* Skip to Content accessible link */}
       <a
         href="#main-content"
@@ -46,6 +66,7 @@ export const App: React.FC = () => {
         onOpenExplore={handleOpenExplore}
         onOpenHowItWorks={handleOpenHowItWorks}
         onOpenBlueprint={handleOpenBlueprint}
+        onLaunchPortal={() => setViewMode('portal')}
       />
 
       {/* Main Content Landmark */}
@@ -55,6 +76,7 @@ export const App: React.FC = () => {
           onOpenExplore={handleOpenExplore}
           onOpenHowItWorks={handleOpenHowItWorks}
           onOpenBlueprint={handleOpenBlueprint}
+          onLaunchPortal={() => setViewMode('portal')}
         />
 
         {/* 2. Problem */}
