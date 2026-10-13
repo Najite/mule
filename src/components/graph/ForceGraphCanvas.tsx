@@ -29,6 +29,7 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
   const lastMousePosRef = useRef({ x: 0, y: 0 });
   const animationFrameRef = useRef<number>(0);
   const particleOffsetRef = useRef<number>(0);
+  const alphaRef = useRef<number>(1.0);
 
   // Filtered nodes based on risk threshold (always keep device and bvn nodes if connected)
   const filteredNodes = nodes.filter(
@@ -39,8 +40,9 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
     (e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)
   );
 
-  // Center nodes initially if needed
+  // Center nodes and reheat simulation when nodes or filter threshold change
   useEffect(() => {
+    alphaRef.current = 1.0;
     if (nodes.length > 0) {
       const radius = Math.min(240, 60 + nodes.length * 15);
       nodes.forEach((node, i) => {
@@ -54,7 +56,7 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
       });
       setTransform({ x: 0, y: 0, scale: 1 });
     }
-  }, [nodes]);
+  }, [nodes, filterRiskThreshold]);
 
   // Main Simulation & Rendering Loop
   const render = useCallback(() => {
@@ -65,80 +67,96 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
 
     const width = canvas.width / (window.devicePixelRatio || 1);
     const height = canvas.height / (window.devicePixelRatio || 1);
-
-    // 1. Force Physics Simulation Step with Spatial Cutoff
-    const repulsion = 4800;
-    const springLength = 130;
-    const springK = 0.038;
-    const centerGravity = 0.014;
-    const damping = 0.85;
-    const maxRepulsionDistSq = 90000; // 300px spatial cutoff
-
-    // Repulsion between all node pairs
-    for (let i = 0; i < filteredNodes.length; i++) {
-      const n1 = filteredNodes[i];
-      for (let j = i + 1; j < filteredNodes.length; j++) {
-        const n2 = filteredNodes[j];
-        const dx = n2.x - n1.x;
-        const dy = n2.y - n1.y;
-        const distSq = dx * dx + dy * dy + 100;
-        if (distSq > maxRepulsionDistSq) continue; // Spatial optimization
-
-        const dist = Math.sqrt(distSq);
-        const force = repulsion / distSq;
-
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-
-        if (!n1.isPinned) {
-          n1.vx -= fx;
-          n1.vy -= fy;
-        }
-        if (!n2.isPinned) {
-          n2.vx += fx;
-          n2.vy += fy;
-        }
-      }
-    }
-
-    // Spring attraction along active edges
     const nodeLookup = new Map(filteredNodes.map((n) => [n.id, n]));
-    for (const edge of filteredEdges) {
-      const s = nodeLookup.get(edge.source);
-      const t = nodeLookup.get(edge.target);
-      if (s && t) {
-        const dx = t.x - s.x;
-        const dy = t.y - s.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const targetLen = edge.typology === 'device_link' || edge.typology === 'bvn_link' ? 90 : springLength;
-        const displacement = dist - targetLen;
-        const force = displacement * springK;
 
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
+    // 1. Force Physics Simulation Step with Alpha Cooling & Settling
+    if (alphaRef.current > 0.005) {
+      const alpha = alphaRef.current;
+      const repulsion = 4800 * alpha;
+      const springLength = 130;
+      const springK = 0.038 * alpha;
+      const centerGravity = 0.014 * alpha;
+      const damping = 0.85;
+      const maxRepulsionDistSq = 90000; // 300px spatial cutoff
 
-        if (!s.isPinned) {
-          s.vx += fx;
-          s.vy += fy;
-        }
-        if (!t.isPinned) {
-          t.vx -= fx;
-          t.vy -= fy;
+      // Repulsion between all node pairs
+      for (let i = 0; i < filteredNodes.length; i++) {
+        const n1 = filteredNodes[i];
+        for (let j = i + 1; j < filteredNodes.length; j++) {
+          const n2 = filteredNodes[j];
+          const dx = n2.x - n1.x;
+          const dy = n2.y - n1.y;
+          const distSq = dx * dx + dy * dy + 100;
+          if (distSq > maxRepulsionDistSq) continue; // Spatial optimization
+
+          const dist = Math.sqrt(distSq);
+          const force = repulsion / distSq;
+
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          if (!n1.isPinned) {
+            n1.vx -= fx;
+            n1.vy -= fy;
+          }
+          if (!n2.isPinned) {
+            n2.vx += fx;
+            n2.vy += fy;
+          }
         }
       }
-    }
 
-    // Center gravity and position integration
-    for (const n of filteredNodes) {
-      if (!n.isPinned) {
-        n.vx -= n.x * centerGravity;
-        n.vy -= n.y * centerGravity;
+      // Spring attraction along active edges
+      for (const edge of filteredEdges) {
+        const s = nodeLookup.get(edge.source);
+        const t = nodeLookup.get(edge.target);
+        if (s && t) {
+          const dx = t.x - s.x;
+          const dy = t.y - s.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const targetLen = edge.typology === 'device_link' || edge.typology === 'bvn_link' ? 90 : springLength;
+          const displacement = dist - targetLen;
+          const force = displacement * springK;
 
-        n.vx *= damping;
-        n.vy *= damping;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
 
-        n.x += n.vx;
-        n.y += n.vy;
+          if (!s.isPinned) {
+            s.vx += fx;
+            s.vy += fy;
+          }
+          if (!t.isPinned) {
+            t.vx -= fx;
+            t.vy -= fy;
+          }
+        }
+      }
+
+      // Center gravity and position integration
+      let totalEnergy = 0;
+      for (const n of filteredNodes) {
+        if (!n.isPinned) {
+          n.vx -= n.x * centerGravity;
+          n.vy -= n.y * centerGravity;
+
+          n.vx *= damping;
+          n.vy *= damping;
+
+          n.x += n.vx;
+          n.y += n.vy;
+
+          totalEnergy += n.vx * n.vx + n.vy * n.vy;
+        }
+      }
+
+      // Smooth cooling schedule
+      if (isDraggingRef.current) {
+        alphaRef.current = Math.max(alphaRef.current, 0.4);
+      } else {
+        alphaRef.current *= 0.96;
+        if (totalEnergy < 0.05) {
+          alphaRef.current = 0; // Settled into equilibrium
+        }
       }
     }
 
@@ -407,6 +425,7 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
       isDraggingRef.current = true;
       dragNodeRef.current = clickedNode;
       clickedNode.isPinned = true;
+      alphaRef.current = 0.8; // Reheat physics simulation on node interaction
       onSelectNode(clickedNode);
     } else {
       isPanningRef.current = true;
@@ -421,6 +440,7 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
       dragNodeRef.current.y = y;
       dragNodeRef.current.vx = 0;
       dragNodeRef.current.vy = 0;
+      alphaRef.current = Math.max(alphaRef.current, 0.5);
     } else if (isPanningRef.current) {
       const dx = e.clientX - lastMousePosRef.current.x;
       const dy = e.clientY - lastMousePosRef.current.y;
@@ -457,6 +477,7 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
 
   const handleResetView = () => {
     setTransform({ x: 0, y: 0, scale: 1 });
+    alphaRef.current = 1.0;
     nodes.forEach((n) => {
       n.isPinned = false;
     });

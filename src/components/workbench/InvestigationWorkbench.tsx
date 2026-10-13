@@ -7,6 +7,7 @@ import { ForceGraphCanvas } from '@/components/graph/ForceGraphCanvas';
 import { LiveVerificationModal } from './LiveVerificationModal';
 import { GoAmlReportGenerator } from '@/lib/services/goaml-generator';
 import { AiCopilotService, ForensicDossierResult } from '@/lib/services/ai-copilot';
+import { investigationStore } from '@/lib/storage/investigation-store';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -210,6 +211,15 @@ export const InvestigationWorkbench: React.FC = () => {
     }
   };
 
+  // Restore persisted PND frozen accounts on mount from IndexedDB
+  useEffect(() => {
+    investigationStore.getAllFrozenAccounts().then((records) => {
+      if (records.length > 0) {
+        setFrozenAccountIds(new Set(records.map((r) => r.accountId)));
+      }
+    });
+  }, []);
+
   // Handle Finacle PND Trigger Simulation & State Mutation
   const handleTriggerPnd = () => {
     const targetCluster = selectedCluster || detectionResults.clusters[0];
@@ -226,6 +236,25 @@ export const InvestigationWorkbench: React.FC = () => {
       const next = new Set(prev);
       targetAccountIds.forEach((id) => next.add(id));
       return next;
+    });
+
+    // Persist to IndexedDB and record auditable compliance action
+    targetAccountIds.forEach((id) => {
+      investigationStore.saveFrozenAccount({
+        accountId: id,
+        bankCode: '057',
+        reasonCode: '08',
+        reasonDescription: 'CBN AML/CFT 2022 - SUSPECTED MONEY MULE RING',
+        frozenAt: new Date().toISOString(),
+        initiator: 'FININT_AUTO_ENGINE_L2',
+        status: 'ACTIVE_PND',
+      });
+      investigationStore.logAuditAction({
+        action: 'PND_FREEZE',
+        targetEntityId: id,
+        details: 'Placed automated Finacle PND hold pursuant to CBN AML Guidelines',
+        officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+      });
     });
 
     const payload = {
@@ -258,6 +287,13 @@ export const InvestigationWorkbench: React.FC = () => {
       next.delete(accountId);
       return next;
     });
+    investigationStore.removeFrozenAccount(accountId);
+    investigationStore.logAuditAction({
+      action: 'PND_UNFREEZE',
+      targetEntityId: accountId,
+      details: 'PND restriction lifted by compliance officer',
+      officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+    });
     setPndStatus(`Finacle Core API: Account ${accountId} PND restriction lifted.`);
   };
 
@@ -270,6 +306,13 @@ export const InvestigationWorkbench: React.FC = () => {
       cluster: primaryCluster,
       nodes: detectionResults.nodes,
       edges: detectionResults.edges,
+    });
+
+    investigationStore.logAuditAction({
+      action: 'GOAML_EXPORT',
+      targetEntityId: primaryCluster.id,
+      details: `Generated NFIU goAML XML regulatory filing for cluster ${primaryCluster.name}`,
+      officerId: 'ZENITH_AML_INVESTIGATOR_L2',
     });
 
     setCurrentGoAmlXml(xml);
