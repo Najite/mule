@@ -88,6 +88,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [selectedNode, setSelectedNode] = useState<EntityNode | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<SyndicateCluster | null>(null);
+  const [syndicatePanelOpen, setSyndicatePanelOpen] = useState<boolean>(true);
 
   // Filter & Search
   const [riskFilterThreshold, setRiskFilterThreshold] = useState<number>(0);
@@ -492,44 +493,57 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
       setIsStreaming(false);
     } else {
       setIsStreaming(true);
+      // Immediately navigate to Forensic Graph Studio so user watches graph update in real-time
+      setActiveTab('graph');
+
       const rails: PaymentRail[] = ['NIP', 'POS', 'ATM', 'MOBILE', 'WEB'];
-      const syntheticAccounts = [
-        '2081940192',
-        '2081940201',
-        '2081940319',
-        '2081940428',
-        '0129481729',
-        '0129481992',
-      ];
 
       streamIntervalRef.current = window.setInterval(async () => {
-        const srcIdx = Math.floor(Math.random() * syntheticAccounts.length);
-        let tgtIdx = Math.floor(Math.random() * syntheticAccounts.length);
-        if (tgtIdx === srcIdx) tgtIdx = (srcIdx + 1) % syntheticAccounts.length;
+        setTransactions((prev) => {
+          // Extract active account nodes from currently loaded dataset
+          const currentAccountIds = Array.from(
+            new Set(
+              prev
+                .map((t) => t.sourceId)
+                .concat(prev.map((t) => t.targetId))
+                .filter((id) => id && !id.startsWith('DEV-') && !id.startsWith('BVN-'))
+            )
+          );
+          const pool =
+            currentAccountIds.length >= 2
+              ? currentAccountIds
+              : ['ACC-4891', 'ACC-8204', 'ACC-3195', 'ACC-9042', 'ACC-5718'];
 
-        const newTx: TransactionRecord = {
-          id: `STREAM-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
-          timestamp: new Date().toISOString(),
-          sourceId: syntheticAccounts[srcIdx],
-          sourceName: `Mule Node ${srcIdx + 1}`,
-          targetId: syntheticAccounts[tgtIdx],
-          targetName: `Mule Node ${tgtIdx + 1}`,
-          amount: Math.floor(1500000 + Math.random() * 8500000),
-          rail: rails[Math.floor(Math.random() * rails.length)],
-          narration: 'RAPID NIP VELOCITY ROUTING',
-          deviceId: `DEV-LG-${srcIdx % 2 ? 'ALPHA' : 'BETA'}`,
-          bvn: `2219481029${srcIdx}`,
-        };
+          const srcIdx = Math.floor(Math.random() * pool.length);
+          let tgtIdx = Math.floor(Math.random() * pool.length);
+          if (tgtIdx === srcIdx) tgtIdx = (srcIdx + 1) % pool.length;
 
-        // Prepend locally
-        setTransactions((prev) => [newTx, ...prev.slice(0, 75)]);
+          const sourceAccount = pool[srcIdx];
+          const targetAccount = pool[tgtIdx];
+
+          const newTx: TransactionRecord = {
+            id: `STREAM-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+            timestamp: new Date().toISOString(),
+            sourceId: sourceAccount,
+            sourceName: `Mule Node ${sourceAccount.slice(-4)}`,
+            targetId: targetAccount,
+            targetName: `Mule Node ${targetAccount.slice(-4)}`,
+            amount: Math.floor(1800000 + Math.random() * 4200000),
+            rail: rails[Math.floor(Math.random() * rails.length)],
+            narration: 'RAPID NIP PAC.008 VELOCITY ROUTE',
+            deviceId: 'DEV-IOS-22',
+            bvn: 'BVN-2281940192',
+          };
+
+          if (isSupabaseConfigured()) {
+            SupabaseDbService.insertTransactions([newTx]);
+          }
+
+          return [newTx, ...prev.slice(0, 100)];
+        });
+
         triggerRealtimeIndicator();
-
-        // Also push to Supabase if connected
-        if (isSupabaseConfigured()) {
-          SupabaseDbService.insertTransactions([newTx]);
-        }
-      }, 2400);
+      }, 2000);
     }
   };
 
@@ -679,7 +693,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
           })}
         </nav>
 
-        {/* Live System Telemetry / Database Box */}
+        {/* Institutional Regulatory & Clearing Status */}
         <div className="p-3 border-t border-[#1E293B] bg-[#0E131D]/80">
           <div className="rounded-lg border border-[#1E293B] bg-[#080B10] p-2.5 space-y-2">
             <div className="flex items-center justify-between text-[11px]">
@@ -688,36 +702,36 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                   className={`size-2 rounded-full ${
                     supabaseConnected
                       ? 'bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse'
-                      : 'bg-amber-400'
+                      : 'bg-emerald-400'
                   }`}
                 />
-                <span className="font-mono text-slate-300 text-[10px] font-semibold">
-                  {supabaseConnected ? 'Supabase Live' : 'Database Offline'}
+                <span className="text-slate-200 text-[11px] font-semibold">
+                  NIP Clearing Gateway
                 </span>
               </div>
               <button
                 onClick={loadDatabaseData}
                 disabled={isCheckingDb}
-                className="text-slate-400 hover:text-amber-400 p-0.5 rounded transition-colors"
-                title="Sync Supabase Database"
+                className="text-slate-400 hover:text-amber-400 p-0.5 rounded transition-colors cursor-pointer"
+                title="Refresh Interbank Telemetry"
               >
                 <RefreshCw className={`size-3 ${isCheckingDb ? 'animate-spin text-amber-400' : ''}`} />
               </button>
             </div>
 
-            <div className="space-y-1 text-[10px] font-mono text-slate-400">
-              <div className="flex justify-between">
-                <span>Ref:</span>
-                <span className="text-slate-300 truncate max-w-[110px]">zxgxbpvrermaavosiwrp</span>
+            <div className="space-y-1.5 text-[10px] text-slate-400">
+              <div className="flex justify-between items-center">
+                <span>Standard:</span>
+                <span className="text-slate-300 font-mono">ISO 20022 pacs.008</span>
               </div>
-              <div className="flex justify-between">
-                <span>Region:</span>
-                <span className="text-slate-300">eu-central-1</span>
+              <div className="flex justify-between items-center">
+                <span>Data Privacy:</span>
+                <span className="text-slate-300 font-mono">NDPA §39 In-VPC</span>
               </div>
-              <div className="flex justify-between">
-                <span>Realtime Sync:</span>
-                <span className={realtimePulse ? 'text-amber-400 font-bold' : 'text-emerald-400'}>
-                  {realtimePulse ? 'Syncing...' : 'Subscribed'}
+              <div className="flex justify-between items-center">
+                <span>Regulatory:</span>
+                <span className={realtimePulse ? 'text-amber-400 font-bold' : 'text-emerald-400 font-medium'}>
+                  {realtimePulse ? 'Syncing...' : 'CBN AML/CFT 2022'}
                 </span>
               </div>
             </div>
@@ -820,10 +834,33 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
 
 
         {/* DYNAMIC TAB BODY */}
-        <main className="flex-1 overflow-y-auto">
+        <main
+          className={`flex-1 min-h-0 w-full ${
+            activeTab === 'graph' ? 'overflow-hidden flex flex-col h-full' : 'overflow-y-auto'
+          }`}
+        >
           {/* TAB 1: EXECUTIVE OVERSIGHT DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="p-6 space-y-6 max-w-7xl mx-auto">
+              {/* Live Streaming Notification Banner */}
+              {isStreaming && (
+                <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300">
+                  <div className="flex items-center gap-2.5">
+                    <span className="size-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                    <span>
+                      Real-time pacs.008 clearing stream is active. High-velocity NIP transactions are flowing through the network.
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('graph')}
+                    className="font-bold underline text-amber-400 hover:text-amber-300 flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <span>View Live Forensic Graph</span>
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* High Impact KPI Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="rounded-xl border border-[#1E293B] bg-[#0E131D]/80 p-5 relative overflow-hidden group hover:border-amber-500/40 transition-colors">
@@ -1034,7 +1071,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
 
           {/* TAB 2: FORENSIC GRAPH STUDIO */}
           {activeTab === 'graph' && (
-            <div className="h-full flex flex-col relative overflow-hidden">
+            <div className="h-full flex-1 flex flex-col relative overflow-hidden min-h-[500px]">
               {/* Studio Toolbar */}
               <div className="h-12 border-b border-[#1E293B] bg-[#0E131D]/90 px-4 flex items-center justify-between flex-shrink-0 z-10">
                 <div className="flex items-center gap-3">
@@ -1113,42 +1150,98 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                   privacyMaskingEnabled={privacyMaskingEnabled}
                 />
 
-                {/* Left Floating Cluster Selector */}
-                <div className="absolute top-4 left-4 w-64 max-h-[calc(100%-2rem)] overflow-y-auto space-y-2 pointer-events-auto">
-                  <div className="bg-[#0B0F17]/90 backdrop-blur-md border border-[#1E293B] rounded-lg p-3 shadow-lg shadow-black/50">
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold mb-2 flex items-center justify-between">
-                      <span>Detected Syndicates</span>
-                      <span className="text-amber-400">{clusters.length}</span>
-                    </div>
+                {/* Left Floating Cluster Selector with Collapsible Focus Mode */}
+                {!syndicatePanelOpen ? (
+                  <button
+                    onClick={() => setSyndicatePanelOpen(true)}
+                    className="absolute top-4 left-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0B0F17]/95 border border-[#1E293B] hover:border-amber-500/40 text-slate-200 text-xs font-medium shadow-xl backdrop-blur-md transition-all cursor-pointer"
+                    title="Expand Syndicates Drawer"
+                  >
+                    <Network className="size-3.5 text-amber-400" />
+                    <span>Syndicates ({clusters.length})</span>
+                  </button>
+                ) : (
+                  <div className="absolute top-4 left-4 w-72 max-h-[calc(100%-2.5rem)] overflow-y-auto space-y-2 pointer-events-auto z-20">
+                    <div className="bg-[#0B0F17]/95 backdrop-blur-md border border-[#1E293B] rounded-xl p-3.5 shadow-2xl shadow-black/70">
+                      <div className="flex items-center justify-between pb-2 border-b border-[#1E293B] mb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                            Active Syndicates
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            {clusters.length}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setSyndicatePanelOpen(false)}
+                          className="text-slate-400 hover:text-white p-1 rounded hover:bg-[#1E293B] transition-colors cursor-pointer"
+                          title="Collapse Panel (Maximize Graph View)"
+                        >
+                          <ChevronRight className="size-3.5 rotate-180" />
+                        </button>
+                      </div>
 
-                    <div className="space-y-1.5">
-                      {clusters.map((c: SyndicateCluster) => {
-                        const isSelected = selectedCluster?.id === c.id;
-                        return (
-                          <button
-                            key={c.id}
-                            onClick={() => {
-                              setSelectedCluster(c);
-                              const firstNode = nodes.find((n: EntityNode) => c.nodeIds.includes(n.id));
-                              if (firstNode) setSelectedNode(firstNode);
-                            }}
-                            className={`w-full text-left p-2 rounded-md text-xs font-mono transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300'
-                                : 'bg-[#080B10] border border-[#1E293B] text-slate-300 hover:border-slate-600'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between font-bold">
-                              <span>{c.code}</span>
-                              <span className="text-[10px] text-red-400">Risk {c.riskScore}</span>
-                            </div>
-                            <div className="text-[11px] truncate text-slate-400 mt-0.5">{c.name}</div>
-                          </button>
-                        );
-                      })}
+                      <div className="space-y-2">
+                        {clusters.map((c: SyndicateCluster) => {
+                          const isSelected = selectedCluster?.id === c.id;
+
+                          // Format unique, distinctive identifiers for each typology
+                          let cardTitle = c.name;
+                          let cardSubtitle = `${c.nodeIds.length} Nodes • ₦${(c.totalExposure / 1_000_000).toFixed(1)}M`;
+                          let typologyBadge = c.code;
+
+                          if (c.code === 'TYP-04') {
+                            const devToken = c.sharedHardware?.[0] || 'DEV-TOKEN';
+                            cardTitle = `Device: ${devToken}`;
+                            cardSubtitle = `${c.nodeIds.length - 1} Accounts • ₦${(c.totalExposure / 1_000_000).toFixed(1)}M`;
+                            typologyBadge = 'HARDWARE';
+                          } else if (c.code === 'TYP-01') {
+                            const anchorId = c.nodeIds[0] || '';
+                            const maskedAnchor = privacyMaskingEnabled
+                              ? DataProtectionService.maskAccountNumber(anchorId, true)
+                              : anchorId;
+                            cardTitle = `Smurfing: ${maskedAnchor}`;
+                            cardSubtitle = `${c.nodeIds.length - 1} Outbound • ${
+                              c.timeVelocityMinutes ? `${c.timeVelocityMinutes}m window` : 'Rapid Velocity'
+                            }`;
+                            typologyBadge = 'SMURFING';
+                          } else if (c.code === 'TYP-03') {
+                            cardTitle = `SCC Loop: ${c.nodeIds.length} Accounts`;
+                            cardSubtitle = `Circular Flow • ₦${(c.totalExposure / 1_000_000).toFixed(1)}M`;
+                            typologyBadge = 'SCC CYCLE';
+                          }
+
+                          return (
+                            <button
+                              key={c.id}
+                              onClick={() => {
+                                setSelectedCluster(c);
+                                const firstNode = nodes.find((n: EntityNode) => c.nodeIds.includes(n.id));
+                                if (firstNode) setSelectedNode(firstNode);
+                              }}
+                              className={`w-full text-left p-2.5 rounded-lg text-xs transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-500/15 border border-amber-500/50 text-slate-100 shadow-md shadow-amber-500/10'
+                                  : 'bg-[#0E131E]/80 border border-[#1E293B] text-slate-300 hover:border-slate-500/70 hover:bg-[#141B26]'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-mono text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                                  {typologyBadge}
+                                </span>
+                                <span className="text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">
+                                  Risk {c.riskScore}
+                                </span>
+                              </div>
+                              <div className="font-semibold text-white truncate text-[11px]">{cardTitle}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 font-mono truncate">{cardSubtitle}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* Right Inspector Drawer (Node or Cluster or AI Dossier) */}
                 {(selectedNode || selectedCluster || aiDossier) && (

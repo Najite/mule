@@ -68,11 +68,10 @@ export class GroqForensicService {
     }).format(cluster.totalExposure);
 
     const startTime = performance.now();
-
-    const groq = this.getClient();
     const modelToUse = modelOverride || this.PRIMARY_MODEL;
 
     try {
+      const groq = this.getClient();
       const systemPrompt = `You are a Principal AML/CFT Forensic Auditor and Central Bank of Nigeria (CBN) Special Enforcement Advisor for Zenith Bank Plc.
 Your role is to produce rigorous, institutional-grade AML Dossiers for suspicious financial syndicates detected on NIBSS Instant Payment (NIP) rails.
 Ground all reasoning strictly on:

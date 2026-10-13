@@ -1,6 +1,4 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import cytoscape, { Core, EventObject, LayoutOptions } from 'cytoscape';
-import dagre from 'cytoscape-dagre';
 import { EntityNode, EntityEdge } from '@/lib/graph-engine/types';
 import { DataProtectionService } from '@/lib/security/data-protection';
 import {
@@ -8,24 +6,13 @@ import {
   Pause,
   SkipBack,
   SkipForward,
+  RotateCcw,
   ZoomIn,
   ZoomOut,
   Layers,
   Circle,
   GitCommit,
-  ShieldAlert,
-  Smartphone,
-  Fingerprint,
-  Lock,
-  Maximize2,
 } from 'lucide-react';
-
-// Register dagre layout plugin safely (idempotent)
-try {
-  cytoscape.use(dagre);
-} catch {
-  // Already registered
-}
 
 export type LayoutMode = 'pipeline' | 'ring' | 'force';
 
@@ -46,17 +33,30 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
   filterRiskThreshold = 0,
   privacyMaskingEnabled = true,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const cyRef = useRef<Core | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('pipeline');
+  // Transform states (Pan & Zoom)
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [hoveredNode, setHoveredNode] = useState<EntityNode | null>(null);
-  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('pipeline');
 
   // Fund Journey Replay States
   const [isPlayingFlow, setIsPlayingFlow] = useState<boolean>(true);
   const [activeHopIndex, setActiveHopIndex] = useState<number>(0);
   const [flowSpeed, setFlowSpeed] = useState<number>(1); // 1x or 2x
+
+  // Interactive drag state refs
+  const isDraggingRef = useRef(false);
+  const isPanningRef = useRef(false);
+  const dragNodeRef = useRef<EntityNode | null>(null);
+  const lastMousePosRef = useRef({ x: 0, y: 0 });
+  const animationFrameRef = useRef<number>(0);
+  const particleOffsetRef = useRef<number>(0);
+  const arrivalRippleRef = useRef<{ x: number; y: number; radius: number; alpha: number } | null>(null);
+  const alphaRef = useRef<number>(0.0);
+
+  // Persistent node positions map to ELIMINATE BOUNCING AND JITTER
+  const persistentPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   // Filtered nodes based on risk threshold
   const filteredNodes = useMemo(() => {
@@ -67,14 +67,13 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
 
   const filteredNodeIds = useMemo(() => new Set(filteredNodes.map((n) => n.id)), [filteredNodes]);
 
-  // Filtered and chronologically sorted edges
+  // Filtered and chronologically sorted edges for accurate Fund Flow Pipeline
   const filteredEdges = useMemo(() => {
     const list = edges.filter(
       (e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)
     );
-    return [...list].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    // Sort financial transfers chronologically by timestamp
+    return [...list].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   }, [edges, filteredNodeIds]);
 
   // Financial edges only (excludes static device/bvn links) for fund journey replay
@@ -84,532 +83,575 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
     );
   }, [filteredEdges]);
 
+  // Active Hop Edge
   const currentHopEdge = financialHops[activeHopIndex] || null;
 
-  // Helper to format node labels with privacy masking
-  const formatNodeLabel = useCallback(
-    (n: EntityNode) => {
-      if (n.type === 'device') {
-        return n.label.replace('DEV-', '');
+  // Apply deterministic, stable layout when layoutMode changes or new nodes arrive
+  const applyLayout = useCallback(
+    (mode: LayoutMode, forceReset = false) => {
+      const positions = persistentPosRef.current;
+      const count = filteredNodes.length;
+      if (count === 0) return;
+
+      if (mode === 'pipeline') {
+        // Chronological Stage Pipeline Layout: Inflow Source -> Layer 1 -> Layer 2 -> Consolidation
+        // Compute in-degree / out-degree topological stage for each node
+        const inDeg = new Map<string, number>();
+        const outDeg = new Map<string, number>();
+        filteredNodes.forEach((n) => {
+          inDeg.set(n.id, 0);
+          outDeg.set(n.id, 0);
+        });
+        filteredEdges.forEach((e) => {
+          if (inDeg.has(e.target)) inDeg.set(e.target, (inDeg.get(e.target) || 0) + 1);
+          if (outDeg.has(e.source)) outDeg.set(e.source, (outDeg.get(e.source) || 0) + 1);
+        });
+
+        // Group into 4 distinct horizontal stages
+        const stages: EntityNode[][] = [[], [], [], []];
+        filteredNodes.forEach((n) => {
+          const inCount = inDeg.get(n.id) || 0;
+          const outCount = outDeg.get(n.id) || 0;
+          if (n.type === 'device' || n.type === 'bvn') {
+            stages[1].push(n); // Hardware / BVN layer in center top/bottom
+          } else if (inCount === 0 && outCount > 0) {
+            stages[0].push(n); // Pure Sources (Stage 0: Left)
+          } else if (inCount > 0 && outCount === 0) {
+            stages[3].push(n); // Pure Sinks / Cashout (Stage 3: Right)
+          } else if (inCount >= outCount) {
+            stages[2].push(n); // Layer 2 Consolidation (Stage 2: Mid-Right)
+          } else {
+            stages[1].push(n); // Layer 1 Transit Mules (Stage 1: Mid-Left)
+          }
+        });
+
+        // Ensure non-empty stages if circular cycle exists
+        if (stages[0].length === 0 && filteredNodes.length > 0) {
+          filteredNodes.forEach((n, idx) => {
+            stages[idx % 4].push(n);
+          });
+        }
+
+        const stageX = [-260, -90, 90, 260];
+        stages.forEach((stageNodes, stageIdx) => {
+          const colX = stageX[stageIdx];
+          const totalInStage = stageNodes.length;
+          stageNodes.forEach((node, rowIdx) => {
+            const spacing = Math.min(100, 360 / (totalInStage + 1));
+            const y = (rowIdx - (totalInStage - 1) / 2) * spacing;
+            node.x = colX;
+            node.y = y;
+            node.vx = 0;
+            node.vy = 0;
+            positions.set(node.id, { x: node.x, y: node.y });
+          });
+        });
+        alphaRef.current = 0; // Completely settled immediately
+      } else if (mode === 'ring') {
+        // Syndicate Circular Layout: Evenly spaced circular ring showing clean clockwise routing
+        const radiusX = Math.min(260, 90 + count * 20);
+        const radiusY = Math.min(200, 70 + count * 15);
+        filteredNodes.forEach((node, i) => {
+          const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+          node.x = Math.cos(angle) * radiusX;
+          node.y = Math.sin(angle) * radiusY;
+          node.vx = 0;
+          node.vy = 0;
+          positions.set(node.id, { x: node.x, y: node.y });
+        });
+        alphaRef.current = 0; // Settled immediately
+      } else if (mode === 'force') {
+        // Organic force layout with fast settling
+        filteredNodes.forEach((node, i) => {
+          if (!positions.has(node.id) || forceReset) {
+            const angle = (i / count) * Math.PI * 2;
+            const r = 160;
+            node.x = Math.cos(angle) * r;
+            node.y = Math.sin(angle) * r;
+            positions.set(node.id, { x: node.x, y: node.y });
+          } else {
+            const saved = positions.get(node.id)!;
+            node.x = saved.x;
+            node.y = saved.y;
+          }
+          node.vx = 0;
+          node.vy = 0;
+        });
+        alphaRef.current = 0.4; // Soft cooling
       }
-      if (n.type === 'bvn') {
-        return privacyMaskingEnabled
-          ? `BVN ···${n.label.slice(-4)}`
-          : n.label;
-      }
-      if (n.type === 'account') {
-        const masked = privacyMaskingEnabled
-          ? DataProtectionService.maskAccountNumber(n.label, true)
-          : n.label;
-        return masked;
-      }
-      return n.label;
     },
-    [privacyMaskingEnabled]
+    [filteredNodes, filteredEdges]
   );
 
-  // Helper to get node color
-  const getNodeColor = (n: EntityNode) => {
-    if (n.isFrozen) return '#DC2626'; // Red freeze
-    if (n.type === 'device') return '#F97316'; // Orange device
-    if (n.type === 'bvn') return '#06B6D4'; // Cyan BVN
-    if (n.riskScore >= 90) return '#EF4444'; // High risk red
-    if (n.riskScore >= 60) return '#F59E0B'; // Medium risk amber
-    return '#10B981'; // Low risk emerald
-  };
-
-  // Convert application nodes and edges into Cytoscape elements definition
-  const cytoscapeElements = useMemo(() => {
-    const elements: cytoscape.ElementDefinition[] = [];
-
-    filteredNodes.forEach((n) => {
-      const displayLabel = formatNodeLabel(n);
-      const nodeColor = getNodeColor(n);
-
-      elements.push({
-        group: 'nodes',
-        data: {
-          id: n.id,
-          label: displayLabel,
-          type: n.type,
-          riskScore: n.riskScore,
-          isFrozen: n.isFrozen ? 'true' : 'false',
-          color: nodeColor,
-          rawNode: n,
-        },
-      });
-    });
-
-    filteredEdges.forEach((e) => {
-      const isDeviceLink = e.relationType === 'AUTHENTICATED_ON';
-      const isBvnLink = e.relationType === 'REGISTERED_TO_BVN';
-      const amountMillions = (e.amount / 1_000_000).toFixed(1);
-      const amountLabel = isDeviceLink || isBvnLink ? '' : `₦${amountMillions}M`;
-
-      let edgeColor = '#64748B'; // Default slate
-      if (isDeviceLink) edgeColor = '#F97316';
-      else if (isBvnLink) edgeColor = '#06B6D4';
-      else if (e.isHighRisk || e.typology === 'circular') edgeColor = '#EF4444';
-      else edgeColor = '#94A3B8';
-
-      elements.push({
-        group: 'edges',
-        data: {
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          amount: e.amount,
-          amountLabel,
-          rail: e.rail,
-          color: edgeColor,
-          relationType: e.relationType || 'FINANCIAL_TRANSFER',
-          isDeviceLink: isDeviceLink ? 'true' : 'false',
-          isBvnLink: isBvnLink ? 'true' : 'false',
-          rawEdge: e,
-        },
-      });
-    });
-
-    return elements;
-  }, [filteredNodes, filteredEdges, formatNodeLabel]);
-
-  // Layout configuration generator
-  const getLayoutConfig = useCallback((mode: LayoutMode): LayoutOptions => {
-    switch (mode) {
-      case 'pipeline':
-        // Forensic Left-to-Right Directed Flow (Dagre)
-        return {
-          name: 'dagre',
-          // @ts-expect-error cytoscape-dagre properties
-          rankDir: 'LR',
-          nodeSep: 60,
-          rankSep: 140,
-          edgeSep: 30,
-          animate: true,
-          animationDuration: 500,
-          fit: true,
-          padding: 60,
-        };
-      case 'ring':
-        // Closed Loop / Circular Flow (Ideal for circular mule typologies)
-        return {
-          name: 'circle',
-          animate: true,
-          animationDuration: 500,
-          fit: true,
-          padding: 60,
-          spacingFactor: 1.15,
-        };
-      case 'force':
-      default:
-        // Organic Compound Spring Embedder (No Overlap Collision Solver)
-        return {
-          name: 'cose',
-          animate: true,
-          animationDuration: 600,
-          refresh: 20,
-          fit: true,
-          padding: 60,
-          nodeOverlap: 30,
-          idealEdgeLength: () => 120,
-          edgeElasticity: () => 100,
-          nodeRepulsion: () => 450000,
-          gravity: 80,
-          numIter: 1000,
-          initialTemp: 200,
-          coolingFactor: 0.95,
-          minTemp: 1.0,
-        };
-    }
-  }, []);
-
-  // Initialize and maintain Cytoscape instance
+  // Position nodes on initial load or layout switch without bouncing
   useEffect(() => {
-    if (!containerRef.current) return;
+    applyLayout(layoutMode, false);
+  }, [layoutMode, applyLayout]);
 
-    // Cytoscape Dark Forensics Theme Stylesheet
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: [],
-      boxSelectionEnabled: false,
-      autounselectify: false,
-      wheelSensitivity: 0.25,
-      style: [
-        // Core Node Default
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'font-family': 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-            'font-size': '10px',
-            'font-weight': 600,
-            color: '#F8FAFC',
-            'text-valign': 'bottom',
-            'text-margin-y': 6,
-            'text-background-color': '#0B0F17',
-            'text-background-opacity': 0.88,
-            'text-background-padding': '3px',
-            'text-border-color': '#1E293B',
-            'text-border-width': 1,
-            'text-border-opacity': 0.8,
-            'background-color': 'data(color)',
-            'border-width': 2,
-            'border-color': '#1E293B',
-            width: 44,
-            height: 44,
-            'transition-property': 'background-color, border-color, border-width, width, height, opacity',
-            'transition-duration': 200,
-          },
-        },
-        // Account Type Nodes
-        {
-          selector: 'node[type = "account"]',
-          style: {
-            shape: 'ellipse',
-            width: 46,
-            height: 46,
-          },
-        },
-        // Device Type Nodes
-        {
-          selector: 'node[type = "device"]',
-          style: {
-            shape: 'diamond',
-            width: 42,
-            height: 42,
-            'border-color': '#EA580C',
-            'border-width': 2,
-          },
-        },
-        // BVN Identity Nodes
-        {
-          selector: 'node[type = "bvn"]',
-          style: {
-            shape: 'hexagon',
-            width: 44,
-            height: 44,
-            'border-color': '#0891B2',
-            'border-width': 2,
-          },
-        },
-        // Frozen Accounts
-        {
-          selector: 'node[isFrozen = "true"]',
-          style: {
-            'border-color': '#EF4444',
-            'border-width': 4,
-            'background-color': '#B91C1C',
-          },
-        },
-        // Selected Node Highlight State
-        {
-          selector: 'node:selected, node.selected',
-          style: {
-            'border-color': '#F59E0B',
-            'border-width': 4,
-            width: 52,
-            height: 52,
-          },
-        },
-        // Hovered Node
-        {
-          selector: 'node.hovered',
-          style: {
-            'border-color': '#38BDF8',
-            'border-width': 3,
-          },
-        },
-        // Dimmed Nodes (During neighborhood inspection or replay)
-        {
-          selector: 'node.dimmed',
-          style: {
-            opacity: 0.25,
-          },
-        },
-        // Highlighted Neighborhood Nodes
-        {
-          selector: 'node.highlighted',
-          style: {
-            opacity: 1,
-            'border-color': '#F59E0B',
-            'border-width': 3,
-          },
-        },
-
-        // CORE EDGES: The Bézier Multigraph Arc Revolution!
-        {
-          selector: 'edge',
-          style: {
-            // Bezier curve separates parallel multi-hop transactions cleanly with ZERO overlap
-            'curve-style': 'bezier',
-            'control-point-step-size': 40,
-            'line-color': 'data(color)',
-            'target-arrow-color': 'data(color)',
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': 1.2,
-            width: 2.5,
-            label: 'data(amountLabel)',
-            'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            'font-size': '9px',
-            'font-weight': 600,
-            color: '#F1F5F9',
-            'text-background-color': '#0B0F17',
-            'text-background-opacity': 0.88,
-            'text-background-padding': '2px',
-            'text-border-color': '#334155',
-            'text-border-width': 1,
-            'text-rotation': 'autorotate',
-            'transition-property': 'line-color, target-arrow-color, width, opacity',
-            'transition-duration': 200,
-          },
-        },
-        // Device Link Edges (dashed)
-        {
-          selector: 'edge[isDeviceLink = "true"]',
-          style: {
-            'line-style': 'dashed',
-            'line-dash-pattern': [4, 4],
-            'target-arrow-shape': 'circle',
-            width: 2,
-          },
-        },
-        // BVN Link Edges (dotted)
-        {
-          selector: 'edge[isBvnLink = "true"]',
-          style: {
-            'line-style': 'dotted',
-            'target-arrow-shape': 'tee',
-            width: 2,
-          },
-        },
-        // Active Replay Hop Edge Glow
-        {
-          selector: 'edge.active-hop',
-          style: {
-            'line-color': '#10B981',
-            'target-arrow-color': '#10B981',
-            width: 5,
-            'line-style': 'solid',
-            opacity: 1,
-            'z-index': 999,
-          },
-        },
-        // Highlighted Neighborhood Edges
-        {
-          selector: 'edge.highlighted',
-          style: {
-            'line-color': '#F59E0B',
-            'target-arrow-color': '#F59E0B',
-            width: 3.5,
-            opacity: 1,
-          },
-        },
-        // Dimmed Edges
-        {
-          selector: 'edge.dimmed',
-          style: {
-            opacity: 0.15,
-          },
-        },
-      ],
-    });
-
-    cyRef.current = cy;
-
-    // Node Tap / Select Listener
-    cy.on('tap', 'node', (evt: EventObject) => {
-      const node = evt.target;
-      const rawNode: EntityNode = node.data('rawNode');
-      if (rawNode) {
-        onSelectNode(rawNode);
-      }
-    });
-
-    // Node Hover Listeners
-    cy.on('mouseover', 'node', (evt: EventObject) => {
-      const node = evt.target;
-      const rawNode: EntityNode = node.data('rawNode');
-      if (rawNode) {
-        setHoveredNode(rawNode);
-        const renderedPos = node.renderedPosition();
-        setHoverPos({ x: renderedPos.x, y: renderedPos.y });
-        node.addClass('hovered');
-
-        // Highlight connected edges and 1-hop neighbors
-        const connectedEdges = node.connectedEdges();
-        const connectedNodes = connectedEdges.connectedNodes();
-
-        cy.elements().addClass('dimmed');
-        node.removeClass('dimmed').addClass('highlighted');
-        connectedNodes.removeClass('dimmed').addClass('highlighted');
-        connectedEdges.removeClass('dimmed').addClass('highlighted');
-      }
-    });
-
-    cy.on('mouseout', 'node', (evt: EventObject) => {
-      setHoveredNode(null);
-      setHoverPos(null);
-      evt.target.removeClass('hovered');
-      cy.elements().removeClass('dimmed highlighted');
-    });
-
-    // Background Tap Clears Selection
-    cy.on('tap', (evt: EventObject) => {
-      if (evt.target === cy) {
-        setHoveredNode(null);
-        setHoverPos(null);
-        cy.elements().removeClass('dimmed highlighted selected');
-      }
-    });
-
-    return () => {
-      cy.destroy();
-      cyRef.current = null;
-    };
-  }, [onSelectNode]);
-
-  // Synchronize elements smoothly in batches without recreating Cytoscape
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-
-    const existingNodeIds = new Set(cy.nodes().map((n) => n.id()));
-    const existingEdgeIds = new Set(cy.edges().map((e) => e.id()));
-
-    const newNodes = cytoscapeElements.filter((el) => el.group === 'nodes');
-    const newEdges = cytoscapeElements.filter((el) => el.group === 'edges');
-
-    const newNodeIds = new Set(newNodes.map((n) => n.data.id));
-    const newEdgeIds = new Set(newEdges.map((e) => e.data.id));
-
-    cy.batch(() => {
-      // Remove elements no longer present
-      cy.nodes().forEach((n) => {
-        if (!newNodeIds.has(n.id())) cy.remove(n);
-      });
-      cy.edges().forEach((e) => {
-        if (!newEdgeIds.has(e.id())) cy.remove(e);
-      });
-
-      // Update existing nodes or add new ones
-      newNodes.forEach((n) => {
-        if (existingNodeIds.has(n.data.id!)) {
-          cy.getElementById(n.data.id!).data(n.data);
-        } else {
-          cy.add(n);
-        }
-      });
-
-      // Update existing edges or add new ones
-      newEdges.forEach((e) => {
-        if (existingEdgeIds.has(e.data.id!)) {
-          cy.getElementById(e.data.id!).data(e.data);
-        } else {
-          cy.add(e);
-        }
-      });
-    });
-
-    // Run layout if element count changed or initial load
-    if (newNodeIds.size !== existingNodeIds.size || existingNodeIds.size === 0) {
-      cy.layout(getLayoutConfig(layoutMode)).run();
-    }
-  }, [cytoscapeElements, getLayoutConfig, layoutMode]);
-
-  // Synchronize layout when layoutMode changes
-  useEffect(() => {
-    if (!cyRef.current) return;
-    const layout = cyRef.current.layout(getLayoutConfig(layoutMode));
-    layout.run();
-  }, [layoutMode, getLayoutConfig]);
-
-  // Synchronize selected node state
-  useEffect(() => {
-    if (!cyRef.current) return;
-    const cy = cyRef.current;
-    cy.nodes().removeClass('selected');
-    if (selectedNodeId) {
-      const targetNode = cy.getElementById(selectedNodeId);
-      if (targetNode.length > 0) {
-        targetNode.addClass('selected');
-      }
-    }
-  }, [selectedNodeId]);
-
-  // Synchronize Fund Journey Replay Highlight
-  useEffect(() => {
-    if (!cyRef.current) return;
-    const cy = cyRef.current;
-
-    cy.edges().removeClass('active-hop');
-    cy.nodes().removeClass('active-hop-node');
-
-    if (currentHopEdge) {
-      const edgeEl = cy.getElementById(currentHopEdge.id);
-      if (edgeEl.length > 0) {
-        edgeEl.addClass('active-hop');
-        const sourceNode = cy.getElementById(currentHopEdge.source);
-        const targetNode = cy.getElementById(currentHopEdge.target);
-        sourceNode.addClass('active-hop-node');
-        targetNode.addClass('active-hop-node');
-      }
-    }
-  }, [currentHopEdge]);
-
-  // Fund Journey Replay Interval Timer
+  // Handle flow journey replay timer
   useEffect(() => {
     if (!isPlayingFlow || financialHops.length === 0) return;
 
-    const intervalMs = flowSpeed === 2 ? 1500 : 2500;
-    const timer = setInterval(() => {
+    const interval = window.setInterval(() => {
       setActiveHopIndex((prev) => (prev + 1) % financialHops.length);
-    }, intervalMs);
+      particleOffsetRef.current = 0;
+    }, 2800 / flowSpeed);
 
-    return () => clearInterval(timer);
-  }, [isPlayingFlow, flowSpeed, financialHops.length]);
+    return () => window.clearInterval(interval);
+  }, [isPlayingFlow, financialHops.length, flowSpeed]);
 
-  // Zoom and fit controls
-  const handleZoomIn = () => {
-    if (!cyRef.current) return;
-    cyRef.current.zoom({
-      level: cyRef.current.zoom() * 1.25,
-      renderedPosition: { x: cyRef.current.width() / 2, y: cyRef.current.height() / 2 },
+  // Main Simulation & Rendering Loop
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width / (window.devicePixelRatio || 1);
+    const height = canvas.height / (window.devicePixelRatio || 1);
+    const nodeLookup = new Map(filteredNodes.map((n) => [n.id, n]));
+
+    // 1. Soft Physics only if alpha > 0.01 (Force mode only)
+    if (alphaRef.current > 0.01 && layoutMode === 'force') {
+      const alpha = alphaRef.current;
+      const repulsion = 2400 * alpha;
+      const springLength = 120;
+      const springK = 0.04 * alpha;
+      const damping = 0.75; // Strong damping to kill jitter
+
+      for (let i = 0; i < filteredNodes.length; i++) {
+        const n1 = filteredNodes[i];
+        for (let j = i + 1; j < filteredNodes.length; j++) {
+          const n2 = filteredNodes[j];
+          const dx = n2.x - n1.x;
+          const dy = n2.y - n1.y;
+          const distSq = dx * dx + dy * dy + 80;
+          const dist = Math.sqrt(distSq);
+          const force = repulsion / distSq;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          if (!n1.isPinned) {
+            n1.vx -= fx;
+            n1.vy -= fy;
+          }
+          if (!n2.isPinned) {
+            n2.vx += fx;
+            n2.vy += fy;
+          }
+        }
+      }
+
+      for (const edge of filteredEdges) {
+        const s = nodeLookup.get(edge.source);
+        const t = nodeLookup.get(edge.target);
+        if (s && t) {
+          const dx = t.x - s.x;
+          const dy = t.y - s.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const displacement = dist - springLength;
+          const force = displacement * springK;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          if (!s.isPinned) {
+            s.vx += fx;
+            s.vy += fy;
+          }
+          if (!t.isPinned) {
+            t.vx += fx;
+            t.vy += fy;
+          }
+        }
+      }
+
+      for (const n of filteredNodes) {
+        if (!n.isPinned) {
+          n.vx -= n.x * 0.01 * alpha;
+          n.vy -= n.y * 0.01 * alpha;
+          n.vx *= damping;
+          n.vy *= damping;
+          n.x += n.vx;
+          n.y += n.vy;
+          persistentPosRef.current.set(n.id, { x: n.x, y: n.y });
+        }
+      }
+      alphaRef.current *= 0.92;
+    }
+
+    // 2. Clear Canvas & Background Grid
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+
+    // Viewport transform
+    ctx.translate(width / 2 + transform.x, height / 2 + transform.y);
+    ctx.scale(transform.scale, transform.scale);
+
+    // Subtle dark grid
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    const gridBound = 600;
+    for (let x = -gridBound; x <= gridBound; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, -gridBound);
+      ctx.lineTo(x, gridBound);
+      ctx.stroke();
+    }
+    for (let y = -gridBound; y <= gridBound; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(-gridBound, y);
+      ctx.lineTo(gridBound, y);
+      ctx.stroke();
+    }
+
+    // Flow packet animation offset tick (moves smoothly 0 -> 1)
+    particleOffsetRef.current = (particleOffsetRef.current + 0.012 * flowSpeed) % 1;
+
+    // Trigger arrival ripple when packet reaches near target (offset ~ 0.98)
+    if (particleOffsetRef.current > 0.96 && currentHopEdge) {
+      const targetNode = nodeLookup.get(currentHopEdge.target);
+      if (targetNode && !arrivalRippleRef.current) {
+        arrivalRippleRef.current = {
+          x: targetNode.x,
+          y: targetNode.y,
+          radius: 20,
+          alpha: 0.8,
+        };
+      }
+    }
+
+    // 3. Render Directed Edges with Actual Fund Flow
+    for (let i = 0; i < filteredEdges.length; i++) {
+      const edge = filteredEdges[i];
+      const s = nodeLookup.get(edge.source);
+      const t = nodeLookup.get(edge.target);
+      if (!s || !t) continue;
+
+      const isDeviceLink = edge.relationType === 'AUTHENTICATED_ON' || edge.typology === 'device_link';
+      const isBvnLink = edge.relationType === 'REGISTERED_TO_BVN' || edge.typology === 'bvn_link';
+      const isCurrentHop = currentHopEdge?.id === edge.id;
+      const isHighRisk = edge.isHighRisk || edge.typology === 'circular';
+
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+
+      if (isDeviceLink) {
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+      } else if (isBvnLink) {
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([2, 3]);
+        ctx.stroke();
+      } else if (isCurrentHop) {
+        // ACTIVE HOP: High-intensity glowing energy beam
+        ctx.strokeStyle = isHighRisk ? '#EF4444' : '#F59E0B';
+        ctx.lineWidth = 3.5;
+        ctx.setLineDash([]);
+        ctx.shadowColor = isHighRisk ? '#EF4444' : '#F59E0B';
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      } else {
+        // Standard financial flow edge
+        ctx.strokeStyle = isHighRisk ? 'rgba(239, 68, 68, 0.5)' : 'rgba(245, 158, 11, 0.25)';
+        ctx.lineWidth = isHighRisk ? 2 : 1.5;
+        ctx.setLineDash([]);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      // Directed Arrowhead & Flow Packets for financial edges
+      if (!isDeviceLink && !isBvnLink) {
+        const midX = (s.x + t.x) / 2;
+        const midY = (s.y + t.y) / 2;
+        const angle = Math.atan2(t.y - s.y, t.x - s.x);
+        const arrowSize = isCurrentHop ? 8 : 6;
+
+        // Draw clear directional arrowhead
+        ctx.save();
+        ctx.translate(midX, midY);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-arrowSize * 1.5, -arrowSize);
+        ctx.lineTo(-arrowSize * 1.5, arrowSize);
+        ctx.closePath();
+        ctx.fillStyle = isCurrentHop ? '#FFFFFF' : isHighRisk ? '#EF4444' : '#F59E0B';
+        ctx.fill();
+        ctx.restore();
+
+        // Edge Amount Badge (Displays e.g. "₦18.5M" centered with backdrop)
+        const amtText = `₦${(edge.amount / 1_000_000).toFixed(1)}M`;
+        ctx.font = 'bold 8px "JetBrains Mono", monospace';
+        const textWidth = ctx.measureText(amtText).width;
+        const badgeY = midY - 10;
+
+        ctx.fillStyle = isCurrentHop ? 'rgba(15, 23, 42, 0.95)' : 'rgba(11, 15, 23, 0.85)';
+        ctx.strokeStyle = isCurrentHop ? (isHighRisk ? '#EF4444' : '#F59E0B') : 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(midX - textWidth / 2 - 4, badgeY - 6, textWidth + 8, 12, 3);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = isCurrentHop ? (isHighRisk ? '#FCA5A5' : '#FDE68A') : '#94A3B8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(amtText, midX, badgeY);
+
+        // ACTUAL TRAVELING FUND FLOW PACKET (Funds moving from Source -> Target!)
+        // If current hop: bright pulsing packet carrying stolen funds
+        if (!s.isFrozen && (isCurrentHop || isPlayingFlow)) {
+          const progress = isCurrentHop ? particleOffsetRef.current : (particleOffsetRef.current + i * 0.25) % 1;
+          const px = s.x + (t.x - s.x) * progress;
+          const py = s.y + (t.y - s.y) * progress;
+
+          // Packet glow and body
+          ctx.beginPath();
+          ctx.arc(px, py, isCurrentHop ? 4.5 : 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = isCurrentHop ? '#FFFFFF' : isHighRisk ? '#EF4444' : '#FBBF24';
+          ctx.shadowColor = isCurrentHop ? (isHighRisk ? '#EF4444' : '#F59E0B') : 'transparent';
+          ctx.shadowBlur = isCurrentHop ? 8 : 0;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+    }
+
+    // Render Arrival Ripple Effect (When money packet hits destination node!)
+    if (arrivalRippleRef.current) {
+      const rip = arrivalRippleRef.current;
+      ctx.beginPath();
+      ctx.arc(rip.x, rip.y, rip.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(16, 185, 129, ${rip.alpha})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      rip.radius += 1.5;
+      rip.alpha -= 0.05;
+      if (rip.alpha <= 0) {
+        arrivalRippleRef.current = null;
+      }
+    }
+
+    // 4. Render Nodes (Stable, Pinned, Distinctly Color-Coded)
+    for (const node of filteredNodes) {
+      const isSelected = node.id === selectedNodeId;
+      const isHovered = hoveredNode?.id === node.id;
+      const isCritical = node.riskScore >= 75;
+      const isDevice = node.type === 'device';
+      const isBvn = node.type === 'bvn';
+      const isFrozen = !!node.isFrozen;
+      const isHopSource = currentHopEdge?.source === node.id;
+      const isHopTarget = currentHopEdge?.target === node.id;
+      const radius = isSelected ? 24 : isDevice ? 18 : 20;
+
+      // Glow behind active hop sender or receiver
+      if (isHopSource) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 10, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+        ctx.fill();
+      } else if (isHopTarget) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 10, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
+        ctx.fill();
+      } else if (isFrozen) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+        ctx.fill();
+      }
+
+      // Node Body Circle
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = isFrozen
+        ? '#3A0D0D'
+        : isHopSource
+        ? '#450A0A'
+        : isHopTarget
+        ? '#064E3B'
+        : isSelected
+        ? '#F59E0B'
+        : isCritical
+        ? '#181C26'
+        : isDevice
+        ? '#2E1065'
+        : isBvn
+        ? '#083344'
+        : '#12151D';
+      ctx.fill();
+
+      // Node Border
+      ctx.lineWidth = isHopSource || isHopTarget ? 3 : isFrozen ? 3.5 : isSelected ? 3 : isCritical ? 2.5 : 1.5;
+      ctx.strokeStyle = isFrozen
+        ? '#EF4444'
+        : isHopSource
+        ? '#EF4444'
+        : isHopTarget
+        ? '#10B981'
+        : isSelected
+        ? '#FFFFFF'
+        : isCritical
+        ? '#EF4444'
+        : isDevice
+        ? '#A855F7'
+        : isBvn
+        ? '#06B6D4'
+        : isHovered
+        ? '#FBBF24'
+        : 'rgba(255, 255, 255, 0.18)';
+      ctx.stroke();
+
+      // Node Inner Prefix
+      ctx.fillStyle = isSelected ? '#08090C' : '#FFFFFF';
+      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const typePrefix = isDevice ? 'DEV' : isBvn ? 'BVN' : 'ACC';
+      ctx.fillText(typePrefix, node.x, node.y - 3);
+
+      // Mini Risk / Status Label
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = isFrozen ? '#FCA5A5' : isHopTarget ? '#6EE7B7' : isCritical ? '#EF4444' : '#94A3B8';
+      ctx.fillText(isFrozen ? 'PND' : isHopSource ? 'OUT' : isHopTarget ? 'IN' : `${node.riskScore}`, node.x, node.y + 6);
+
+      // Label below node (NDPA Masked if privacy mode is on)
+      const displayLabel = privacyMaskingEnabled
+        ? DataProtectionService.maskAccountNumber(node.id, true)
+        : node.id;
+
+      ctx.font = '9px "JetBrains Mono", monospace';
+      ctx.fillStyle = isSelected ? '#F59E0B' : '#E2E8F0';
+      ctx.fillText(displayLabel, node.x, node.y + radius + 12);
+    }
+
+    ctx.restore();
+    animationFrameRef.current = requestAnimationFrame(render);
+  }, [
+    filteredNodes,
+    filteredEdges,
+    selectedNodeId,
+    hoveredNode,
+    transform,
+    layoutMode,
+    currentHopEdge,
+    isPlayingFlow,
+    flowSpeed,
+    privacyMaskingEnabled,
+  ]);
+
+  // Start rendering loop
+  useEffect(() => {
+    animationFrameRef.current = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animationFrameRef.current);
+  }, [render]);
+
+  // Canvas Mouse & Interaction handlers (Pan, Drag node, Zoom)
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    lastMousePosRef.current = { x: mouseX, y: mouseY };
+
+    const width = canvas.width / (window.devicePixelRatio || 1);
+    const height = canvas.height / (window.devicePixelRatio || 1);
+    const worldX = (mouseX - width / 2 - transform.x) / transform.scale;
+    const worldY = (mouseY - height / 2 - transform.y) / transform.scale;
+
+    // Check node click
+    const clicked = filteredNodes.find((n) => {
+      const dx = n.x - worldX;
+      const dy = n.y - worldY;
+      return dx * dx + dy * dy <= 22 * 22;
     });
+
+    if (clicked) {
+      isDraggingRef.current = true;
+      dragNodeRef.current = clicked;
+      clicked.isPinned = true;
+      onSelectNode(clicked);
+    } else {
+      isPanningRef.current = true;
+    }
   };
 
-  const handleZoomOut = () => {
-    if (!cyRef.current) return;
-    cyRef.current.zoom({
-      level: cyRef.current.zoom() * 0.8,
-      renderedPosition: { x: cyRef.current.width() / 2, y: cyRef.current.height() / 2 },
-    });
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const width = canvas.width / (window.devicePixelRatio || 1);
+    const height = canvas.height / (window.devicePixelRatio || 1);
+    const worldX = (mouseX - width / 2 - transform.x) / transform.scale;
+    const worldY = (mouseY - height / 2 - transform.y) / transform.scale;
+
+    if (isDraggingRef.current && dragNodeRef.current) {
+      dragNodeRef.current.x = worldX;
+      dragNodeRef.current.y = worldY;
+      dragNodeRef.current.vx = 0;
+      dragNodeRef.current.vy = 0;
+      persistentPosRef.current.set(dragNodeRef.current.id, { x: worldX, y: worldY });
+    } else if (isPanningRef.current) {
+      const dx = mouseX - lastMousePosRef.current.x;
+      const dy = mouseY - lastMousePosRef.current.y;
+      setTransform((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+      lastMousePosRef.current = { x: mouseX, y: mouseY };
+    } else {
+      const hovered = filteredNodes.find((n) => {
+        const dx = n.x - worldX;
+        const dy = n.y - worldY;
+        return dx * dx + dy * dy <= 22 * 22;
+      });
+      setHoveredNode(hovered || null);
+    }
   };
 
-  const handleResetView = () => {
-    if (!cyRef.current) return;
-    cyRef.current.fit(undefined, 60);
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+    isPanningRef.current = false;
+    dragNodeRef.current = null;
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+    setTransform((prev) => ({
+      ...prev,
+      scale: Math.min(2.5, Math.max(0.4, prev.scale * zoomFactor)),
+    }));
   };
 
   return (
-    <div className="relative w-full h-full bg-[#070A0F] overflow-hidden select-none">
-      {/* Background Micro Grid Pattern */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-20"
-        style={{
-          backgroundImage: 'radial-gradient(circle, #334155 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
-        }}
-        aria-hidden="true"
+    <div className="relative w-full h-full overflow-hidden bg-[#070A0F] select-none">
+      <canvas
+        ref={canvasRef}
+        width={1400}
+        height={900}
+        role="img"
+        aria-label={`Interactive financial network graph with ${filteredNodes.length} active nodes and ${edges.length} payment paths.`}
+        tabIndex={0}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        className="w-full h-full cursor-crosshair block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
       />
 
-      {/* Main Cytoscape Canvas DOM Mounting Node */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-
-      {/* Accessible Screen Reader Entity Navigation */}
+      {/* Accessible Screen Reader Entity Navigation (better-accessibility) */}
       <div className="sr-only" aria-live="polite">
         <p>
-          Financial Intelligence Cytoscape Graph contains {filteredNodes.length} entities and{' '}
-          {filteredEdges.length} relation edges.
+          Financial Intelligence Graph contains {filteredNodes.length} entities.
           {selectedNodeId ? ` Selected entity: ${selectedNodeId}.` : ' No entity selected.'}
         </p>
         <ul>
@@ -623,31 +665,30 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
         </ul>
       </div>
 
-      {/* TOP FLOATING FORENSIC CONTROLS */}
-      <div className="absolute top-4 right-4 flex items-center gap-2 bg-[#0B0F17]/95 backdrop-blur-md p-1.5 rounded-xl border border-[#1E293B] shadow-2xl z-20 font-mono text-xs">
-        {/* Layout Algorithms Switcher */}
-        <div className="flex items-center gap-1 bg-[#080B10] p-1 rounded-lg border border-[#1E293B]">
+      {/* TOP FLOATING CONTROLS: Layout Switcher & View Tools */}
+      <div className="absolute top-4 right-4 flex items-center gap-2 bg-[#0B0F17]/90 backdrop-blur-md p-1.5 rounded-lg border border-[#1E293B] shadow-xl z-10 font-mono text-xs">
+        <div className="flex items-center gap-1 bg-[#080B10] p-1 rounded-md border border-[#1E293B]">
           <button
             onClick={() => setLayoutMode('pipeline')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               layoutMode === 'pipeline'
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Dagre Hierarchical: Originators (Left) -> Layering Mules (Center) -> Cashout Sinks (Right)"
+            title="Chronological Stage Pipeline: Stage 0 (Source) -> Layer 1 -> Layer 2 -> Sink"
           >
             <GitCommit className="size-3" />
-            <span>Flow Pipeline (Dagre)</span>
+            <span>Flow Pipeline</span>
           </button>
 
           <button
             onClick={() => setLayoutMode('ring')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               layoutMode === 'ring'
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Geometric Circular Layout: Directly exposes closed-loop circular money laundering (Typology 03)"
+            title="Syndicate Circular Flow: Clean geometric circular loop showing circular money laundering"
           >
             <Circle className="size-3" />
             <span>Syndicate Ring</span>
@@ -655,122 +696,58 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
 
           <button
             onClick={() => setLayoutMode('force')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               layoutMode === 'force'
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="CoSE Physics Layout: Compound spring embedder with collision avoidance"
+            title="Organic Network Force Graph"
           >
             <Layers className="size-3" />
-            <span>Network (CoSE)</span>
+            <span>Network</span>
           </button>
         </div>
 
         <div className="h-4 w-px bg-[#1E293B]" />
 
-        {/* Zoom & Fit Actions */}
+        {/* Zoom & Reset */}
         <button
-          onClick={handleZoomIn}
-          className="p-1.5 rounded-lg hover:bg-[#1E293B] text-slate-400 hover:text-white cursor-pointer"
+          onClick={() => setTransform((prev) => ({ ...prev, scale: Math.min(2.5, prev.scale * 1.15) }))}
+          className="p-1.5 rounded hover:bg-[#1E293B] text-slate-400 hover:text-white cursor-pointer"
           title="Zoom In"
         >
           <ZoomIn className="size-3.5" />
         </button>
         <button
-          onClick={handleZoomOut}
-          className="p-1.5 rounded-lg hover:bg-[#1E293B] text-slate-400 hover:text-white cursor-pointer"
+          onClick={() => setTransform((prev) => ({ ...prev, scale: Math.max(0.4, prev.scale * 0.85) }))}
+          className="p-1.5 rounded hover:bg-[#1E293B] text-slate-400 hover:text-white cursor-pointer"
           title="Zoom Out"
         >
           <ZoomOut className="size-3.5" />
         </button>
         <button
-          onClick={handleResetView}
-          className="p-1.5 rounded-lg hover:bg-[#1E293B] text-slate-400 hover:text-white cursor-pointer"
-          title="Fit Graph to Viewport"
+          onClick={() => setTransform({ x: 0, y: 0, scale: 1 })}
+          className="p-1.5 rounded hover:bg-[#1E293B] text-slate-400 hover:text-white cursor-pointer"
+          title="Reset View"
         >
-          <Maximize2 className="size-3.5" />
+          <RotateCcw className="size-3.5" />
         </button>
       </div>
 
-      {/* HOVER TOOLTIP CARD */}
-      {hoveredNode && hoverPos && (
-        <div
-          className="absolute pointer-events-none z-30 bg-[#0B0F17]/95 border border-[#1E293B] rounded-xl p-3 shadow-2xl backdrop-blur-md max-w-xs text-xs font-mono"
-          style={{
-            left: Math.min(hoverPos.x + 20, (containerRef.current?.clientWidth || 800) - 240),
-            top: Math.max(hoverPos.y - 40, 20),
-          }}
-        >
-          <div className="flex items-center justify-between pb-1.5 border-b border-[#1E293B] mb-2">
-            <span className="font-bold text-white uppercase flex items-center gap-1.5">
-              {hoveredNode.type === 'device' && <Smartphone className="size-3.5 text-orange-400" />}
-              {hoveredNode.type === 'bvn' && <Fingerprint className="size-3.5 text-cyan-400" />}
-              {hoveredNode.type === 'account' && <ShieldAlert className="size-3.5 text-amber-400" />}
-              <span>{hoveredNode.type}</span>
-            </span>
-            <span
-              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                hoveredNode.riskScore >= 90
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                  : hoveredNode.riskScore >= 60
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-              }`}
-            >
-              Risk: {hoveredNode.riskScore}
-            </span>
-          </div>
-
-          <div className="space-y-1 text-[11px] text-slate-300">
-            <div>
-              <span className="text-slate-500">ID:</span>{' '}
-              <span className="text-white font-semibold">
-                {privacyMaskingEnabled && hoveredNode.type === 'account'
-                  ? DataProtectionService.maskAccountNumber(hoveredNode.id, true)
-                  : hoveredNode.id}
-              </span>
-            </div>
-            {hoveredNode.isFrozen && (
-              <div className="text-red-400 font-bold flex items-center gap-1">
-                <Lock className="size-3" />
-                <span>Core PND Freeze Active</span>
-              </div>
-            )}
-            <div>
-              <span className="text-slate-500">Total Inflow:</span>{' '}
-              <span className="text-emerald-400">
-                ₦{(hoveredNode.metrics.totalInflow / 1_000_000).toFixed(2)}M
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-500">Total Outflow:</span>{' '}
-              <span className="text-amber-400">
-                ₦{(hoveredNode.metrics.totalOutflow / 1_000_000).toFixed(2)}M
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BOTTOM CONTROLLER: Chronological Fund Journey Step-by-Step Replay */}
+      {/* BOTTOM FLOATING CONTROLLER: Chronological Fund Journey Step-by-Step Replay */}
       {financialHops.length > 0 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 bg-[#0B0F17]/95 backdrop-blur-md px-5 py-3 rounded-2xl border border-[#1E293B] shadow-2xl z-20 font-mono text-xs max-w-xl w-[90%] sm:w-full">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 bg-[#0B0F17]/95 backdrop-blur-md px-5 py-3 rounded-xl border border-[#1E293B] shadow-2xl z-10 font-mono text-xs max-w-xl w-full">
           {/* Active Hop Detailed Description */}
           <div className="w-full flex items-center justify-between text-[11px] pb-2 border-b border-[#1E293B]">
-            <div className="flex items-center gap-2 overflow-hidden text-ellipsis whitespace-nowrap">
-              <span className="size-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <span className="text-slate-400 shrink-0">
-                HOP {activeHopIndex + 1} OF {financialHops.length}:
-              </span>
+            <div className="flex items-center gap-2">
+              <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-slate-400">HOP {activeHopIndex + 1} OF {financialHops.length}:</span>
               {currentHopEdge && (
-                <span className="text-white font-bold truncate">
+                <span className="text-white font-bold">
                   {privacyMaskingEnabled
                     ? DataProtectionService.maskAccountNumber(currentHopEdge.source, true)
                     : currentHopEdge.source}{' '}
-                  <span className="text-amber-400">
-                    &rarr; ₦{(currentHopEdge.amount / 1_000_000).toFixed(1)}M ({currentHopEdge.rail}) &rarr;
-                  </span>{' '}
+                  <span className="text-amber-400">&rarr; ₦{(currentHopEdge.amount / 1_000_000).toFixed(1)}M ({currentHopEdge.rail}) &rarr;</span>{' '}
                   {privacyMaskingEnabled
                     ? DataProtectionService.maskAccountNumber(currentHopEdge.target, true)
                     : currentHopEdge.target}
@@ -780,7 +757,7 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
 
             <button
               onClick={() => setFlowSpeed((prev) => (prev === 1 ? 2 : 1))}
-              className="text-[10px] px-2 py-0.5 rounded bg-[#141B26] text-amber-300 border border-[#1E293B] hover:border-amber-500/40 cursor-pointer shrink-0 ml-2"
+              className="text-[10px] px-2 py-0.5 rounded bg-[#141B26] text-amber-300 border border-[#1E293B] hover:border-amber-500/40 cursor-pointer"
             >
               {flowSpeed}x SPEED
             </button>
@@ -789,9 +766,10 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
           {/* Player controls */}
           <div className="flex items-center gap-3">
             <button
-              onClick={() =>
-                setActiveHopIndex((prev) => (prev - 1 + financialHops.length) % financialHops.length)
-              }
+              onClick={() => {
+                setActiveHopIndex((prev) => (prev - 1 + financialHops.length) % financialHops.length);
+                particleOffsetRef.current = 0;
+              }}
               className="p-1.5 rounded-lg bg-[#141B26] hover:bg-[#1E293B] text-slate-300 hover:text-white cursor-pointer"
               title="Previous Hop"
             >
@@ -807,7 +785,10 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveHopIndex((prev) => (prev + 1) % financialHops.length)}
+              onClick={() => {
+                setActiveHopIndex((prev) => (prev + 1) % financialHops.length);
+                particleOffsetRef.current = 0;
+              }}
               className="p-1.5 rounded-lg bg-[#141B26] hover:bg-[#1E293B] text-slate-300 hover:text-white cursor-pointer"
               title="Next Hop"
             >
