@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Foundations */
+  --bg-canvas: #08090C;
+  --bg-surface-subtle: #0D0F15;
+  --bg-surface-raised: #12151D;
+  --bg-surface-overlay: #181C27;
+
+  /* Card and Panel */
+  --card-bg: rgba(18, 21, 29, 0.72);
+  --card-bg-hover: rgba(24, 28, 39, 0.88);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-border-hover: rgba(245, 158, 11, 0.35);
+
+  /* Typography */
+  --text-primary: #F5F5F7;
+  --text-secondary: #9BA3AF;
+  --text-muted: #6B7280;
+  --text-inverse: #08090C;
+
+  /* Intelligence Signal */
+  --signal-amber: #F59E0B;
+  --signal-amber-hover: #D97706;
+  --signal-amber-light: #FBBF24;
+  --signal-amber-subtle: rgba(245, 158, 11, 0.12);
+
+  /* Risk & Threat */
+  --risk-critical: #EF4444;
+  --risk-critical-subtle: rgba(239, 68, 68, 0.12);
+  --risk-border: rgba(239, 68, 68, 0.35);
+
+  /* Verified Status */
+  --status-verified: #10B981;
+  --status-verified-subtle: rgba(16, 185, 129, 0.12);
+
+  /* Scroll padding for sticky header */
+  scroll-padding-top: 5.5rem;
+}
+
+/* Global root typography and smoothing */
+html {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  color-scheme: dark;
+}
+
+/* Tabular numbers on financial and forensic figures */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text balance and pretty wrapping */
+.text-balance {
+  text-wrap: balance;
+}
+
+.text-pretty {
+  text-wrap: pretty;
+}
+
+/* Reduced motion guards */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Accessible focus visible styles */
+:focus-visible {
+  outline: 2px solid var(--signal-amber);
+  outline-offset: 2px;
+}
+
+/* Button active press interaction (better-ui) */
+.btn-press {
+  transition-property: transform, opacity, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.btn-press:enabled:active {
+  transform: scale(0.96);
+}
+
+/* Glassmorphic border */
+.glass-border {
+  border: 1px solid var(--card-border);
+}
+
+.glass-panel {
+  background: var(--card-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border);
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #08090C;
+}
+::-webkit-scrollbar-thumb {
+  background: #1F2430;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2D3446;
+}

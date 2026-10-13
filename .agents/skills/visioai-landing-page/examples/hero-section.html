@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisioAI — Enterprise AI Consulting Hero Section</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #080B11;
+      --bg-secondary: #0D121D;
+      --card-bg: rgba(18, 25, 41, 0.65);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent-indigo: #6366F1;
+      --accent-cyan: #06B6D4;
+      --accent-gradient: linear-gradient(135deg, #6366F1 0%, #06B6D4 100%);
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --status-active: #10B981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 50% -10%, rgba(99, 102, 241, 0.25) 0%, transparent 60%),
+        radial-gradient(circle at 85% 30%, rgba(6, 182, 212, 0.15) 0%, transparent 50%);
+    }
+
+    /* Floating Navigation */
+    .nav-container {
+      position: fixed;
+      top: 24px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      z-index: 50;
+      padding: 0 16px;
+    }
+
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 32px;
+      padding: 12px 24px;
+      background: rgba(14, 20, 33, 0.75);
+      border: 1px solid var(--card-border);
+      border-radius: 9999px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      max-width: 900px;
+      width: 100%;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-spark {
+      width: 22px;
+      height: 22px;
+      background: var(--accent-gradient);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 14px rgba(99, 102, 241, 0.6);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .cta-btn-primary {
+      background: var(--accent-gradient);
+      color: #fff;
+      padding: 9px 20px;
+      border-radius: 9999px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 4px 18px rgba(99, 102, 241, 0.35);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .cta-btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px rgba(99, 102, 241, 0.55);
+    }
+
+    /* Hero */
+    .hero-section {
+      padding-top: 160px;
+      padding-bottom: 80px;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-left: 24px;
+      padding-right: 24px;
+      text-align: center;
+    }
+
+    .eyebrow-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      border-radius: 9999px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--status-active);
+      border-radius: 50%;
+      position: relative;
+    }
+
+    .pulse-dot::after {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.4);
+      animation: ping 2s infinite;
+    }
+
+    @keyframes ping {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    .hero-title {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: clamp(2.5rem, 5.5vw, 4.2rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+      max-width: 960px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .gradient-text {
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-desc {
+      font-size: clamp(1rem, 1.8vw, 1.2rem);
+      color: var(--text-secondary);
+      max-width: 720px;
+      margin: 0 auto 36px auto;
+      line-height: 1.6;
+    }
+
+    .hero-actions {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 60px;
+    }
+
+    .cta-btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-primary);
+      border: 1px solid var(--card-border);
+      padding: 11px 24px;
+      border-radius: 9999px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      text-decoration: none;
+      backdrop-filter: blur(8px);
+      transition: background 0.2s;
+    }
+
+    .cta-btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    /* Dashboard Preview Card */
+    .dashboard-preview {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+      text-align: left;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+    }
+
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+    }
+
+    .metric-box {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .metric-label {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="nav-container">
+    <header class="navbar">
+      <div class="brand">
+        <div class="brand-spark"></div>
+        <span>VisioAI</span>
+      </div>
+      <ul class="nav-links">
+        <li><a href="#services">Services</a></li>
+        <li><a href="#solutions">Solutions</a></li>
+        <li><a href="#process">Process</a></li>
+        <li><a href="#case-studies">Case Studies</a></li>
+      </ul>
+      <a href="#consultation" class="cta-btn-primary">Book Strategy Call</a>
+    </header>
+  </div>
+
+  <main class="hero-section">
+    <div class="eyebrow-badge">
+      <span class="pulse-dot"></span>
+      Enterprise AI Systems & Advisory
+    </div>
+
+    <h1 class="hero-title">
+      Transforming Enterprise Workflows into <span class="gradient-text">Autonomous AI Advantage</span>
+    </h1>
+
+    <p class="hero-desc">
+      We engineer proprietary LLMs, agentic orchestration pipelines, and deterministic AI systems that integrate seamlessly into mission-critical business architectures.
+    </p>
+
+    <div class="hero-actions">
+      <a href="#consultation" class="cta-btn-primary" style="padding: 12px 28px; font-size: 1rem;">Schedule Strategy Call →</a>
+      <a href="#demo" class="cta-btn-secondary">Explore Production Systems</a>
+    </div>
+
+    <div class="dashboard-preview">
+      <div class="card-header">
+        <span style="font-size: 0.9rem; font-weight: 600; color: #94A3B8;">System Telemetry — Enterprise Model Mesh</span>
+        <span style="font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; color: #10B981;">● All Pipelines Optimal</span>
+      </div>
+      <div class="metrics-row">
+        <div class="metric-box">
+          <div class="metric-value">99.4%</div>
+          <div class="metric-label">Model Accuracy Benchmark</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-value">12.8ms</div>
+          <div class="metric-label">Median Token Latency</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-value">$42M+</div>
+          <div class="metric-label">Client Measurable ROI</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>
