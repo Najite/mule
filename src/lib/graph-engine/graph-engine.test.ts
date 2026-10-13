@@ -308,3 +308,55 @@ describe('Iso20022Parser & Sovereign Telemetry: Boundary & Error Handling', () =
   });
 });
 
+describe('DataProtectionService: NDPA 2023 Statutory PII Redaction', () => {
+  it('should mask 11-digit BVN preserving audit parity', async () => {
+    const { DataProtectionService } = await import('../security/data-protection');
+    const masked = DataProtectionService.maskBvn('22194810291', true);
+    expect(masked).toBe('2219*****91');
+    expect(masked.length).toBe(11);
+  });
+
+  it('should mask 10-digit NUBAN account number', async () => {
+    const { DataProtectionService } = await import('../security/data-protection');
+    const masked = DataProtectionService.maskAccountNumber('2081940192', true);
+    expect(masked).toBe('208****192');
+  });
+
+  it('should generate deterministic consortium BVN hash without cleartext exposure', async () => {
+    const { DataProtectionService } = await import('../security/data-protection');
+    const hash1 = DataProtectionService.hashBvnForConsortium('22194810291');
+    const hash2 = DataProtectionService.hashBvnForConsortium('22194810291');
+    expect(hash1).toBe(hash2);
+    expect(hash1.startsWith('BVN_HASH_')).toBe(true);
+  });
+});
+
+describe('CrossBankConsortiumService: NIBSS & Device Telemetry Correlation', () => {
+  it('should intercept cross-bank mule relay on matching shared hardware', async () => {
+    const { CrossBankConsortiumService } = await import('../services/cross-bank-consortium');
+    const relay = CrossBankConsortiumService.evaluateCrossBankRelay(
+      '2081940192',
+      '8039182741',
+      18500000,
+      'DEV-LG-ALPHA-9821'
+    );
+    expect(relay).not.toBeNull();
+    expect(relay?.destinationBankName).toBe('OPay Digital Services');
+    expect(relay?.deltaSeconds).toBe(43);
+    expect(relay?.detectionMechanism).toBe('NIBSS_CONSORTIUM_DEVICE_TELEMETRY');
+  });
+
+  it('should flag rapid smurfing for unlisted accounts with shared device and high value', async () => {
+    const { CrossBankConsortiumService } = await import('../services/cross-bank-consortium');
+    const relay = CrossBankConsortiumService.evaluateCrossBankRelay(
+      '0192837465',
+      '9928172635',
+      8500000,
+      'DEV-MULE-HARDWARE-99'
+    );
+    expect(relay).not.toBeNull();
+    expect(relay?.threatSeverity).toBe('HIGH_SUSPICION');
+    expect(relay?.deltaSeconds).toBe(45);
+  });
+});
+

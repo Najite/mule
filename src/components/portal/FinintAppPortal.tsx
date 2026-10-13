@@ -14,11 +14,18 @@ import { AiCopilotService, ForensicDossierResult } from '@/lib/services/ai-copil
 import { Iso20022Parser } from '@/lib/graph-engine/iso20022-parser';
 import { CsvTransactionParser } from '@/lib/graph-engine/csv-parser';
 import { FrozenAccountRecord, AuditLogEntry } from '@/lib/storage/investigation-store';
+import { DataProtectionService } from '@/lib/security/data-protection';
+import {
+  CrossBankConsortiumService,
+  CrossBankRelayEvent,
+  SAMPLE_CROSS_BANK_RELAYS,
+} from '@/lib/services/cross-bank-consortium';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
   Network,
   ShieldAlert,
+  ShieldCheck,
   Lock,
   FileCode,
   Terminal,
@@ -39,9 +46,19 @@ import {
   Zap,
   Activity,
   ChevronRight,
+  Shuffle,
+  Eye,
 } from 'lucide-react';
 
-export type PortalTab = 'dashboard' | 'graph' | 'nuban' | 'finacle' | 'goaml' | 'audit' | 'ingest';
+export type PortalTab =
+  | 'dashboard'
+  | 'graph'
+  | 'nuban'
+  | 'crossbank'
+  | 'finacle'
+  | 'goaml'
+  | 'audit'
+  | 'ingest';
 
 interface FinintAppPortalProps {
   onSwitchToLanding: () => void;
@@ -115,6 +132,33 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
 
   // Audit Ledger Filter
   const [auditFilterAction, setAuditFilterAction] = useState<string>('ALL');
+
+  // NDPA 2023 Statutory Privacy Masking State
+  const [privacyMaskingEnabled, setPrivacyMaskingEnabled] = useState<boolean>(true);
+
+  // Cross-Bank Relay & Consortium State
+  const [crossBankRelays, setCrossBankRelays] = useState<CrossBankRelayEvent[]>(SAMPLE_CROSS_BANK_RELAYS);
+  const [simSourceAccount, setSimSourceAccount] = useState<string>('2081940192');
+  const [simTargetAccount, setSimTargetAccount] = useState<string>('8039182741');
+  const [simRelayAmount, setSimRelayAmount] = useState<number>(18500000);
+  const [simRelayDeviceId, setSimRelayDeviceId] = useState<string>('DEV-LG-ALPHA-9821');
+  const [activeRelayEvent, setActiveRelayEvent] = useState<CrossBankRelayEvent | null>(SAMPLE_CROSS_BANK_RELAYS[0]);
+
+  // Toggle NDPA 2023 Privacy Redaction with Audit Log
+  const handleTogglePrivacyMasking = async () => {
+    const nextState = !privacyMaskingEnabled;
+    setPrivacyMaskingEnabled(nextState);
+
+    if (!nextState) {
+      await SupabaseDbService.logAuditAction({
+        action: 'SAR_EXPORT',
+        targetEntityId: 'NDPA_PII_DE_ANONYMIZATION',
+        officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+        details: 'Officer requested privileged de-anonymization of BVN & customer PII under NDPA 2023 Sec 24 compliance audit',
+      });
+      triggerRealtimeIndicator();
+    }
+  };
 
   // Trigger brief visual pulse on real-time activity
   const triggerRealtimeIndicator = () => {
@@ -547,6 +591,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
             { id: 'dashboard', label: 'Executive Oversight', icon: LayoutDashboard, badge: `${clusters.length} Rings` },
             { id: 'graph', label: 'Forensic Graph Studio', icon: Network, badge: `${nodes.length} Nodes` },
             { id: 'nuban', label: 'NUBAN & Telemetry', icon: Globe, badge: 'CBN MOD-10' },
+            { id: 'crossbank', label: 'Cross-Bank Relay & NIBSS', icon: Shuffle, badge: 'CFIS / DEV' },
             { id: 'finacle', label: 'Finacle Core PND Console', icon: Lock, badge: `${pndRecords.length} PND` },
             { id: 'goaml', label: 'NFIU goAML Filing Station', icon: FileCode, badge: 'SAR v4.0' },
             { id: 'audit', label: 'Compliance Audit Ledger', icon: Terminal, badge: `${auditLogs.length}` },
@@ -654,6 +699,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                 {activeTab === 'dashboard' && 'Executive Oversight Dashboard'}
                 {activeTab === 'graph' && 'Forensic Graph Intelligence Studio'}
                 {activeTab === 'nuban' && 'NUBAN Checksum & Sovereign Telemetry'}
+                {activeTab === 'crossbank' && 'Cross-Bank Relay & NIBSS Telemetry'}
                 {activeTab === 'finacle' && 'Finacle Core Banking PND Hold Console'}
                 {activeTab === 'goaml' && 'NFIU goAML v4.0 Regulatory Transmission'}
                 {activeTab === 'audit' && 'Compliance Audit Ledger & Hash Trail'}
@@ -689,6 +735,20 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
 
           {/* Right Header Badges */}
           <div className="flex items-center gap-3">
+            {/* NDPA 2023 Statutory Privacy Redaction Toggle */}
+            <button
+              onClick={handleTogglePrivacyMasking}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer ${
+                privacyMaskingEnabled
+                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+              }`}
+              title="Nigeria Data Protection Act 2023 (NDPA) Section 24 statutory PII redaction"
+            >
+              {privacyMaskingEnabled ? <ShieldCheck className="size-3.5 text-emerald-400" /> : <Eye className="size-3.5 text-amber-400" />}
+              <span>{privacyMaskingEnabled ? 'NDPA Masking: ACTIVE' : 'PII De-Anonymized'}</span>
+            </button>
+
             <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-400 bg-[#0E131D] px-2.5 py-1 rounded-md border border-[#1E293B]">
               <span className="text-slate-500">OFFICER:</span>
               <span className="text-amber-400 font-semibold">ZENITH_AML_L2_2841</span>
@@ -700,6 +760,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
             </div>
           </div>
         </header>
+
 
         {/* DYNAMIC TAB BODY */}
         <main className="flex-1 overflow-y-auto">
@@ -875,8 +936,16 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                             <td className="py-2.5 px-3 text-slate-500">
                               {new Date(tx.timestamp).toLocaleTimeString()}
                             </td>
-                            <td className="py-2.5 px-3 text-amber-300">{tx.sourceId}</td>
-                            <td className="py-2.5 px-3 text-slate-300">{tx.targetId}</td>
+                            <td className="py-2.5 px-3 text-amber-300">
+                              {privacyMaskingEnabled
+                                ? DataProtectionService.maskAccountNumber(tx.sourceId, true)
+                                : tx.sourceId}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-300">
+                              {privacyMaskingEnabled
+                                ? DataProtectionService.maskAccountNumber(tx.targetId, true)
+                                : tx.targetId}
+                            </td>
                             <td className="py-2.5 px-3">
                               <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#1E293B] text-slate-300">
                                 {tx.rail}
@@ -984,6 +1053,7 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                     if (matchingCluster) setSelectedCluster(matchingCluster);
                   }}
                   filterRiskThreshold={riskFilterThreshold}
+                  privacyMaskingEnabled={privacyMaskingEnabled}
                 />
 
                 {/* Left Floating Cluster Selector */}
@@ -1294,6 +1364,242 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
             </div>
           )}
 
+          {/* TAB: CROSS-BANK RELAY & NIBSS CONSORTIUM TELEMETRY */}
+          {activeTab === 'crossbank' && (
+            <div className="p-6 space-y-6 max-w-6xl mx-auto">
+              {/* Technical Reality & Consortium Education Banner */}
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
+                <div className="flex items-center gap-2 text-amber-400 font-bold text-sm font-mono">
+                  <Shuffle className="size-4" />
+                  <span>Cross-Bank Mule Detection: How Inter-Institutional Relays Are Intercepted</span>
+                </div>
+                <div className="text-xs text-slate-300 leading-relaxed space-y-2">
+                  <p>
+                    <strong className="text-white">The Industry Question:</strong>{' '}
+                    <em>How does Zenith Bank know that a mule logged into another bank (e.g. OPay, Kuda, Access) immediately after receiving funds to perform an onward transaction?</em>
+                  </p>
+                  <p className="text-slate-400">
+                    <strong className="text-amber-300 font-mono">Zero-Hallucination Architectural Reality:</strong> A single commercial bank’s VPC <span className="text-red-400 font-semibold">cannot</span> view private user screens, keystrokes, or internal database sessions inside another financial institution’s application. Any vendor claiming a standalone bank can monitor competitor app sessions without consortium infrastructure is hallucinating.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-[11px] font-mono text-slate-300">
+                    <div className="p-2.5 rounded bg-[#080B10] border border-[#1E293B] space-y-1">
+                      <span className="text-amber-400 font-bold block">1. Shared Device Consortium</span>
+                      <p className="text-slate-400">
+                        Banks embed ThreatMetrix/NIBSS SDKs generating deterministic hardware hashes (IMEI salt + Canvas UUID). When the same phone opens OPay 30s after Zenith, the consortium detects the concurrent session.
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded bg-[#080B10] border border-[#1E293B] space-y-1">
+                      <span className="text-emerald-400 font-bold block">2. NIP 30-Digit SessionID</span>
+                      <p className="text-slate-400">
+                        Inter-bank transfers carry standardized 30-digit NIP Session IDs and BVN hashes. NIBSS CFIS correlates source and beneficiary identities in sub-second clearing cycles.
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded bg-[#080B10] border border-[#1E293B] space-y-1">
+                      <span className="text-blue-400 font-bold block">3. Rapid Velocity Delta</span>
+                      <p className="text-slate-400">
+                        Receiving institutions flag pass-through smurfing when outflow occurs within &lt; 180s with &gt; 90% volume retention, triggering automated statutory PND freezes.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Intercepted Cross-Bank Relays Table */}
+              <div className="rounded-xl border border-[#1E293B] bg-[#0E131D]/90 p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="size-4 text-red-400" />
+                    <h2 className="text-sm font-semibold font-heading text-white">
+                      Active Cross-Institutional Mule Relays ({crossBankRelays.length} Detected)
+                    </h2>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                    NIBSS CFIS & Device Consortium Active
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-lg border border-[#1E293B]">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-[#080B10] text-slate-400 border-b border-[#1E293B]">
+                      <tr>
+                        <th className="py-2.5 px-3">RELAY ID</th>
+                        <th className="py-2.5 px-3">ORIGIN (ZENITH)</th>
+                        <th className="py-2.5 px-3">DESTINATION INSTITUTION</th>
+                        <th className="py-2.5 px-3 text-right">AMOUNT (₦)</th>
+                        <th className="py-2.5 px-3">HOP DELTA</th>
+                        <th className="py-2.5 px-3">SHARED DEVICE</th>
+                        <th className="py-2.5 px-3">DETECTION SOURCE</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1E293B] text-slate-300">
+                      {crossBankRelays.map((relay) => (
+                        <tr
+                          key={relay.id}
+                          onClick={() => setActiveRelayEvent(relay)}
+                          className="hover:bg-[#141B26] transition-colors cursor-pointer"
+                        >
+                          <td className="py-2.5 px-3 text-amber-400 font-bold">{relay.id}</td>
+                          <td className="py-2.5 px-3 text-slate-300">
+                            {privacyMaskingEnabled
+                              ? DataProtectionService.maskAccountNumber(relay.sourceAccount, true)
+                              : relay.sourceAccount}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="text-white font-semibold">{relay.destinationBankName}</span>{' '}
+                            <span className="text-slate-500">
+                              (
+                              {privacyMaskingEnabled
+                                ? DataProtectionService.maskAccountNumber(relay.destinationAccount, true)
+                                : relay.destinationAccount}
+                              )
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-white">
+                            ₦{relay.amount.toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="text-red-400 font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20">
+                              {relay.deltaSeconds}s Delta
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400">
+                            {privacyMaskingEnabled
+                              ? DataProtectionService.maskDeviceId(relay.sharedDeviceFingerprint, true)
+                              : relay.sharedDeviceFingerprint}
+                          </td>
+                          <td className="py-2.5 px-3 text-[10px] text-emerald-400">
+                            {relay.detectionMechanism.replace(/_/g, ' ')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Selected Relay Deep Technical Telemetry */}
+              {activeRelayEvent && (
+                <div className="rounded-xl border border-[#1E293B] bg-[#0E131D]/90 p-5 space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-[#1E293B] pb-2">
+                    <span className="text-white font-bold flex items-center gap-2">
+                      <span className="size-2 rounded-full bg-red-500 animate-pulse" />
+                      Relay Forensic Analysis: {activeRelayEvent.id}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-bold border border-red-500/30">
+                      {activeRelayEvent.threatSeverity}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-slate-300 pt-1">
+                    <div>
+                      <span className="text-slate-500 block">NIP INTER-BANK SESSION ID:</span>
+                      <span className="text-amber-300 font-bold">{activeRelayEvent.nipSessionId}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">CROSS-INSTITUTIONAL TIMESTAMPS:</span>
+                      <span>
+                        Zenith Inflow: {new Date(activeRelayEvent.inflowTimestamp).toLocaleTimeString()} &rarr; Dest Login:{' '}
+                        {new Date(activeRelayEvent.crossBankLoginTimestamp).toLocaleTimeString()} ({activeRelayEvent.deltaSeconds}s apart)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-[#080B10] border border-[#1E293B] text-slate-300 text-[11px] leading-relaxed">
+                    <strong className="text-amber-400 block mb-1">TECHNICAL PROOF:</strong>
+                    {activeRelayEvent.technicalExplanation}
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-[11px] flex items-center justify-between">
+                    <div>
+                      <strong className="text-red-400 block font-bold">STATUTORY CBN INTERDICTION ORDER:</strong>
+                      {activeRelayEvent.suggestedInterdiction}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleExecutePndFreeze(activeRelayEvent.sourceAccount)}
+                      className="bg-red-600 hover:bg-red-500 text-xs font-semibold cursor-pointer"
+                    >
+                      Lock Both Nodes (PND)
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Interactive Cross-Bank Relay Simulator Form */}
+              <div className="rounded-xl border border-[#1E293B] bg-[#0E131D]/90 p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Shuffle className="size-4 text-amber-400" />
+                  <h3 className="text-sm font-semibold font-heading text-white">
+                    Simulate Cross-Bank Hop & Intercept Telemetry
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Simulate an onward hop from Zenith Bank to an external fintech/commercial bank to test NIBSS Consortium & CFIS correlation heuristics.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
+                  <div>
+                    <label className="text-slate-400 block mb-1">SOURCE (ZENITH)</label>
+                    <input
+                      type="text"
+                      value={simSourceAccount}
+                      onChange={(e) => setSimSourceAccount(e.target.value)}
+                      className="w-full bg-[#080B10] border border-[#1E293B] text-amber-300 rounded-md p-2 focus:border-amber-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">TARGET ACCOUNT</label>
+                    <input
+                      type="text"
+                      value={simTargetAccount}
+                      onChange={(e) => setSimTargetAccount(e.target.value)}
+                      className="w-full bg-[#080B10] border border-[#1E293B] text-slate-200 rounded-md p-2 focus:border-amber-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">AMOUNT (₦)</label>
+                    <input
+                      type="number"
+                      value={simRelayAmount}
+                      onChange={(e) => setSimRelayAmount(Number(e.target.value))}
+                      className="w-full bg-[#080B10] border border-[#1E293B] text-white rounded-md p-2 focus:border-amber-500/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">DEVICE FINGERPRINT</label>
+                    <input
+                      type="text"
+                      value={simRelayDeviceId}
+                      onChange={(e) => setSimRelayDeviceId(e.target.value)}
+                      className="w-full bg-[#080B10] border border-[#1E293B] text-purple-300 rounded-md p-2 focus:border-amber-500/50"
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  onClick={() => {
+                    const result = CrossBankConsortiumService.evaluateCrossBankRelay(
+                      simSourceAccount,
+                      simTargetAccount,
+                      simRelayAmount,
+                      simRelayDeviceId
+                    );
+                    if (result) {
+                      setActiveRelayEvent(result);
+                      setCrossBankRelays((prev) => [result, ...prev.filter((r) => r.id !== result.id)]);
+                      triggerRealtimeIndicator();
+                    }
+                  }}
+                  className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-semibold text-xs cursor-pointer"
+                >
+                  Run Inter-Bank Consortium Evaluation
+                </Button>
+              </div>
+            </div>
+          )}
+
+
           {/* TAB 4: FINACLE CORE PND CONSOLE */}
           {activeTab === 'finacle' && (
             <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -1395,7 +1701,11 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                         <tbody className="divide-y divide-[#1E293B] text-slate-300">
                           {pndRecords.map((rec) => (
                             <tr key={rec.accountId} className="hover:bg-[#141B26]">
-                              <td className="py-2.5 px-3 text-amber-300 font-bold">{rec.accountId}</td>
+                              <td className="py-2.5 px-3 text-amber-300 font-bold">
+                                {privacyMaskingEnabled
+                                  ? DataProtectionService.maskAccountNumber(rec.accountId, true)
+                                  : rec.accountId}
+                              </td>
                               <td className="py-2.5 px-3">{rec.bankCode}</td>
                               <td className="py-2.5 px-3 truncate max-w-[150px]">{rec.reasonDescription}</td>
                               <td className="py-2.5 px-3 text-slate-400">{rec.initiator}</td>
