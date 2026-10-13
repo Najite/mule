@@ -22,6 +22,7 @@ import {
   CrossBankRelayEvent,
   SAMPLE_CROSS_BANK_RELAYS,
 } from '@/lib/services/cross-bank-consortium';
+import { CrossBankRelayVisualizer } from '@/components/crossbank/CrossBankRelayVisualizer';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
@@ -446,6 +447,35 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
     } finally {
       setIsSynthesizingAi(false);
     }
+  };
+
+  // Export Cross-Bank Evidence Package
+  const handleExportRelayEvidence = async (relay: CrossBankRelayEvent) => {
+    const evidence = {
+      event: relay,
+      exportedAt: new Date().toISOString(),
+      officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+      regulatoryJurisdiction: 'CBN_AML_CFT_2022',
+      statutoryLegalBasis: 'Money Laundering (Prevention and Prohibition) Act 2022 Section 6',
+      interdictionDirective: 'Bilateral Category 08 PND Freeze via NIBSS CFIS Gateway',
+    };
+    const jsonStr = JSON.stringify(evidence, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${relay.id}_NIBSS_CONSORTIUM_EVIDENCE.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    await SupabaseDbService.logAuditAction({
+      action: 'SAR_EXPORT',
+      targetEntityId: relay.id,
+      officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+      details: `Exported cross-bank consortium evidence package for relay ${relay.id} (${relay.sourceBankName} -> ${relay.destinationBankName})`,
+    });
   };
 
   // Toggle Live Transaction Stream
@@ -1423,6 +1453,14 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                 </div>
               </div>
 
+              {/* Interactive Cross-Bank Relay Pipeline Visualizer */}
+              <CrossBankRelayVisualizer
+                relay={activeRelayEvent || crossBankRelays[0]}
+                privacyMaskingEnabled={privacyMaskingEnabled}
+                onExecutePnd={handleExecutePndFreeze}
+                onExportEvidence={handleExportRelayEvidence}
+              />
+
               {/* Active Intercepted Cross-Bank Relays Table */}
               <div className="rounded-xl border border-[#1E293B] bg-[#0E131D]/90 p-5 space-y-4">
                 <div className="flex items-center justify-between">
@@ -1455,7 +1493,11 @@ export const FinintAppPortal: React.FC<FinintAppPortalProps> = ({ onSwitchToLand
                         <tr
                           key={relay.id}
                           onClick={() => setActiveRelayEvent(relay)}
-                          className="hover:bg-[#141B26] transition-colors cursor-pointer"
+                          className={`hover:bg-[#141B26] transition-colors cursor-pointer ${
+                            (activeRelayEvent?.id || crossBankRelays[0]?.id) === relay.id
+                              ? 'bg-amber-500/10 border-l-2 border-l-amber-500'
+                              : ''
+                          }`}
                         >
                           <td className="py-2.5 px-3 text-amber-400 font-bold">{relay.id}</td>
                           <td className="py-2.5 px-3 text-slate-300">
