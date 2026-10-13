@@ -231,11 +231,14 @@ export class GraphDetectionEngine {
         (e) => sccSet.has(e.source) && sccSet.has(e.target) && e.relationType === 'FINANCIAL_TRANSFER'
       );
 
+      // Extract topologically verified directed simple cycle path within SCC
+      const directedCyclePath = this.extractDirectedCyclePath(scc, financialAdjacency);
+
       for (const nodeId of scc) {
         const node = nodeMap.get(nodeId);
         if (node) {
           node.metrics.isInCycle = true;
-          node.metrics.cycleLength = scc.length;
+          node.metrics.cycleLength = directedCyclePath.length;
         }
       }
 
@@ -250,16 +253,16 @@ export class GraphDetectionEngine {
       clusters.push({
         id: `RING-SCC-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
         code: 'TYP-03',
-        name: `SCC Circular Layering Loop (${scc.length} Nodes)`,
+        name: `SCC Circular Layering Loop (${directedCyclePath.length} Nodes)`,
         typology: 'circular',
         riskScore: 93,
         nodeIds: scc,
         edgeIds: internalEdges.map((e) => e.id),
         totalExposure: cycleExposure,
-        cycleLength: scc.length,
-        narrative: this.generateSCCNarrative(scc, cycleExposure),
+        cycleLength: directedCyclePath.length,
+        narrative: this.generateSCCNarrative(directedCyclePath, cycleExposure),
         indicators: [
-          `Tarjan's linear SCC traversal proved a closed directed cycle spanning ${scc.length} accounts`,
+          `Tarjan's linear SCC traversal proved a closed directed cycle spanning ${directedCyclePath.length} accounts`,
           `High capital transshipment with negligible overnight retail retention`,
           `Coordinated circular turnover designed to simulate legitimate trade volume`,
         ],
@@ -569,14 +572,61 @@ export class GraphDetectionEngine {
     return results;
   }
 
-  private static generateSCCNarrative(scc: string[], totalAmount: number): string {
+  /**
+   * Traverses internal adjacency within an SCC to extract a mathematically valid simple directed cycle path
+   */
+  private static extractDirectedCyclePath(
+    scc: string[],
+    adjacency: Map<string, Array<{ target: string; edge: EntityEdge }>>
+  ): string[] {
+    const sccSet = new Set(scc);
+    const visited = new Set<string>();
+    const path: string[] = [];
+    const indexInPath = new Map<string, number>();
+
+    const dfs = (curr: string): string[] | null => {
+      path.push(curr);
+      indexInPath.set(curr, path.length - 1);
+      visited.add(curr);
+
+      const neighbors = adjacency.get(curr) || [];
+      for (const { target } of neighbors) {
+        if (!sccSet.has(target)) continue;
+
+        if (indexInPath.has(target)) {
+          const cycleStartIdx = indexInPath.get(target)!;
+          return path.slice(cycleStartIdx);
+        }
+
+        if (!visited.has(target)) {
+          const res = dfs(target);
+          if (res) return res;
+        }
+      }
+
+      path.pop();
+      indexInPath.delete(curr);
+      return null;
+    };
+
+    for (const node of scc) {
+      if (!visited.has(node)) {
+        const cycle = dfs(node);
+        if (cycle && cycle.length >= 2) return cycle;
+      }
+    }
+
+    return scc;
+  }
+
+  private static generateSCCNarrative(cyclePath: string[], totalAmount: number): string {
     const formatted = new Intl.NumberFormat('en-NG', {
       style: 'currency',
       currency: 'NGN',
       maximumFractionDigits: 0,
     }).format(totalAmount);
 
-    return `Tarjan's SCC decomposition verified a closed-loop cyclic fund movement of ${formatted} spanning ${scc.length} accounts (${scc.join(' → ')} → ${scc[0]}). Capital was rapidly routed without underlying trade invoices, characteristic of smurfed turnover laundering.`;
+    return `Tarjan's SCC decomposition verified a closed-loop directed fund flow of ${formatted} spanning ${cyclePath.length} accounts (${cyclePath.join(' → ')} → ${cyclePath[0]}). Capital was rapidly routed without underlying trade invoices, characteristic of smurfed turnover laundering.`;
   }
 
   private static inferNodeType(id: string, merchantType?: string): EntityType {

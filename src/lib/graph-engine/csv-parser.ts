@@ -21,12 +21,14 @@ export class CsvTransactionParser {
       const header = lines[0].toLowerCase().split(',').map((h) => h.trim().replace(/["']/g, ''));
 
       const idIdx = header.findIndex((h) => h === 'id' || h === 'tx_id' || h === 'reference');
+      const timeIdx = header.findIndex((h) => h.includes('timestamp') || h.includes('date') || h.includes('time'));
       const sourceIdx = header.findIndex((h) => h.includes('source') || h.includes('sender') || h.includes('originator'));
       const targetIdx = header.findIndex((h) => h.includes('target') || h.includes('receiver') || h.includes('beneficiary'));
       const amountIdx = header.findIndex((h) => h.includes('amount') || h.includes('value'));
       const railIdx = header.findIndex((h) => h.includes('rail') || h.includes('channel') || h.includes('type'));
       const deviceIdx = header.findIndex((h) => h.includes('device') || h.includes('imei') || h.includes('hardware'));
       const bvnIdx = header.findIndex((h) => h.includes('bvn'));
+      const narrIdx = header.findIndex((h) => h.includes('narration') || h.includes('desc') || h.includes('remark') || h.includes('memo'));
 
       if (sourceIdx === -1 || targetIdx === -1 || amountIdx === -1) {
         return {
@@ -53,16 +55,29 @@ export class CsvTransactionParser {
         const rail = (railIdx !== -1 && parts[railIdx]?.toUpperCase()) as PaymentRail || 'NIP';
         const deviceId = deviceIdx !== -1 && parts[deviceIdx] ? parts[deviceIdx] : undefined;
         const bvn = bvnIdx !== -1 && parts[bvnIdx] ? parts[bvnIdx] : undefined;
+        const narration = narrIdx !== -1 && parts[narrIdx] ? parts[narrIdx] : undefined;
+
+        // Parse authentic timestamp if present; only fallback to relative timestamp if missing/invalid
+        let recordTimestamp: string;
+        if (timeIdx !== -1 && parts[timeIdx]) {
+          const parsed = new Date(parts[timeIdx]);
+          recordTimestamp = !isNaN(parsed.getTime())
+            ? parsed.toISOString()
+            : new Date(Date.now() - (lines.length - i) * 60000).toISOString();
+        } else {
+          recordTimestamp = new Date(Date.now() - (lines.length - i) * 60000).toISOString();
+        }
 
         records.push({
           id: recordId,
-          timestamp: new Date(Date.now() - (lines.length - i) * 60000).toISOString(),
+          timestamp: recordTimestamp,
           sourceId: source,
           targetId: target,
           amount,
           rail: ['NIP', 'POS', 'ATM', 'MOBILE', 'WEB', 'INTERNAL'].includes(rail) ? rail : 'NIP',
           deviceId,
           bvn,
+          narration,
         });
       }
 

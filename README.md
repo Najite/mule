@@ -368,12 +368,12 @@ npm run build
 npm run preview
 ```
 
-### Environment Variables (Optional)
-The application works completely out of the box with public endpoints. If you want to test live Paystack NIBSS name resolution in the verification modal, create a `.env` file:
+### Security & Environment Variables
+The application operates client-side using public endpoints (Paystack public bank directory & ipapi.co) with zero client credentials.
 
-```env
-VITE_PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxxxxxxxxx
-```
+In production institutional deployments:
+- **Zero Client Secrets**: Banking secret keys (Paystack, NIBSS, Finacle) must NEVER be placed in client-side `.env` files or exposed to the browser.
+- **Backend-For-Frontend (BFF)**: All privileged account resolution and Finacle PND API mutations must be routed through an authenticated internal VPC proxy with mutual TLS (mTLS).
 
 ---
 
