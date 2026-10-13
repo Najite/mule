@@ -4,6 +4,10 @@ import { GraphDetectionEngine } from './algorithms';
 import { CsvTransactionParser } from './csv-parser';
 import { GoAmlReportGenerator } from '../services/goaml-generator';
 import { TransactionRecord } from './types';
+import { Iso20022Parser } from './iso20022-parser';
+import { SovereignGeoIpService } from '../services/sovereign-geoip';
+import { FinacleCoreConnector } from '../services/finacle-envelope';
+import { NfiuConnectClient } from '../services/nfiu-connect';
 
 describe('BankingService: Central Bank of Nigeria (CBN) NUBAN MOD-10 Checksum', () => {
   it('should validate official Zenith Bank (057) valid account checksum', () => {
@@ -179,3 +183,97 @@ describe('GoAmlReportGenerator: NFIU AML/CFT XML Generation', () => {
     expect(xml).toContain('EXECUTE FINACLE API MODIFY_ACCOUNT_FREEZE CODE 08');
   });
 });
+
+describe('Iso20022Parser: Interbank Customer Credit Transfer (pacs.008.001.08)', () => {
+  it('should parse official ISO 20022 pacs.008 XML message into structured transaction records', () => {
+    const sampleXml = Iso20022Parser.generateSamplePacs008();
+    const { records, error } = Iso20022Parser.parsePacs008(sampleXml);
+
+    expect(error).toBeUndefined();
+    expect(records.length).toBe(2);
+    expect(records[0].id).toBe('NIP-ZENITH-TX-001');
+    expect(records[0].amount).toBe(4200000);
+    expect(records[0].sourceId).toBe('2081940192');
+    expect(records[0].targetId).toBe('1019284910');
+    expect(records[0].deviceId).toBe('DEV-IOS-22');
+    expect(records[0].bvn).toBe('BVN-2281940192');
+    expect(records[0].rail).toBe('NIP');
+  });
+});
+
+describe('SovereignGeoIpService: In-VPC Subnet Telemetry & NDPA Compliance', () => {
+  it('should resolve local Nigerian mobile LTE subnets with low threat score', () => {
+    const result = SovereignGeoIpService.evaluateIp('102.89.43.12'); // MTN Nigeria
+
+    expect(result.jurisdiction).toBe('NIGERIA');
+    expect(result.countryCode).toBe('NG');
+    expect(result.isp).toContain('MTN Nigeria');
+    expect(result.carrierType).toBe('MOBILE_LTE');
+    expect(result.threatScore).toBeLessThanOrEqual(20);
+    expect(result.isVpnOrProxy).toBe(false);
+    expect(result.ndpaSovereigntyCompliant).toBe(true);
+  });
+
+  it('should flag commercial datacenter Tor exit nodes as critical proxy evasion', () => {
+    const result = SovereignGeoIpService.evaluateIp('185.220.101.5'); // Tor exit subnet
+
+    expect(result.isVpnOrProxy).toBe(true);
+    expect(result.carrierType).toBe('TOR_EXIT');
+    expect(result.threatScore).toBeGreaterThanOrEqual(90);
+    expect(result.threatCategory).toBe('SUSPICIOUS_DATACENTER');
+  });
+});
+
+describe('FinacleCoreConnector: Infosys Finacle FI XML SOAP Envelopes', () => {
+  it('should build valid Finacle FI ModifyAccountFreeze SOAP request envelope', () => {
+    const xml = FinacleCoreConnector.buildModifyAccountFreezeXml({
+      accountNumber: '2081940192',
+      reasonCode: '08',
+      reasonDescription: 'CBN AML/CFT 2022 - SUSPECTED MONEY MULE',
+      caseReference: 'INV-ZENITH-2026-001',
+      initiatorOfficer: 'ZENITH_AML_OFFICER_L2',
+    });
+
+    expect(xml).toContain('<fi:ServiceRequestId>ModifyAccountFreeze</fi:ServiceRequestId>');
+    expect(xml).toContain('<fi:BankId>057</fi:BankId>');
+    expect(xml).toContain('<fi:AcctNum>2081940192</fi:AcctNum>');
+    expect(xml).toContain('<fi:FreezeReasonCode>08</fi:FreezeReasonCode>');
+    expect(xml).toContain('<fi:FreezeType>TOTAL_PND</fi:FreezeType>');
+  });
+
+  it('should simulate Finacle Host processing and return status 00', () => {
+    const response = FinacleCoreConnector.simulateHostExecution({
+      accountNumber: '2081940192',
+      reasonCode: '08',
+      reasonDescription: 'CBN AML/CFT 2022',
+      caseReference: 'INV-2026',
+      initiatorOfficer: 'OFFICER_1',
+    });
+
+    expect(response.status).toBe('SUCCESS');
+    expect(response.responseCode).toBe('00');
+    expect(response.hostTransactionId).toBeDefined();
+    expect(response.rawXml).toContain('<HostResponseCode>00</HostResponseCode>');
+  });
+});
+
+describe('NfiuConnectClient: NFIU goAML B2B WebService Package', () => {
+  it('should generate cryptographic SHA-256 digest and transmission receipt', async () => {
+    const pkg = await NfiuConnectClient.createSubmissionPackage({
+      xmlPayload: '<report><rentity_id>ZENITH_BANK_057</rentity_id></report>',
+      caseReference: 'SAR-ZENITH-089',
+      totalTransactionsCount: 15,
+      totalExposureNgn: 45000000,
+    });
+
+    expect(pkg.reportingEntityId).toBe('ZENITH_BANK_057');
+    expect(pkg.sha256XmlDigest).toBeDefined();
+    expect(pkg.sha256XmlDigest.length).toBe(64); // SHA-256 hex length
+
+    const receipt = NfiuConnectClient.generateTransmissionReceipt(pkg);
+    expect(receipt.status).toBe('ACCEPTED_BY_NFIU');
+    expect(receipt.statusCode).toBe('200_ACK_PROCESSED');
+    expect(receipt.reportingEntity).toBe('ZENITH_BANK_057');
+  });
+});
+
