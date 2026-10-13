@@ -50,7 +50,7 @@ describe('FININT Backend API Test Suite', () => {
     expect(body.success).toBe(true);
     expect(body.data.isValidNuban).toBe(true);
     expect(body.data.cbnCalculatedCheckDigit).toBe(2);
-  });
+  }, 15000);
 
   it('POST /api/v1/banking/finacle-pnd should execute authenticated PND hold with HMAC signature', async () => {
     const res = await fetch(`${baseUrl}/api/v1/banking/finacle-pnd`, {

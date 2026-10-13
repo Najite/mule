@@ -20,7 +20,14 @@ export interface FrozenAccountRecord {
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  action: 'PND_FREEZE' | 'PND_UNFREEZE' | 'SAR_EXPORT' | 'GOAML_EXPORT' | 'DATASET_IMPORT';
+  action:
+    | 'PND_FREEZE'
+    | 'PND_UNFREEZE'
+    | 'SAR_EXPORT'
+    | 'GOAML_EXPORT'
+    | 'DATASET_IMPORT'
+    | 'INGEST_ISO20022'
+    | 'NFIU_TRANSMISSION';
   targetEntityId: string;
   details: string;
   officerId: string;

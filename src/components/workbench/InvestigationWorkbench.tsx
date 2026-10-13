@@ -2,11 +2,22 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { SAMPLE_DATASETS } from '@/lib/graph-engine/sample-datasets';
 import { GraphDetectionEngine } from '@/lib/graph-engine/algorithms';
 import { CsvTransactionParser } from '@/lib/graph-engine/csv-parser';
+import { Iso20022Parser } from '@/lib/graph-engine/iso20022-parser';
 import { TransactionRecord, EntityNode, SyndicateCluster } from '@/lib/graph-engine/types';
 import { ForceGraphCanvas } from '@/components/graph/ForceGraphCanvas';
 import { LiveVerificationModal } from './LiveVerificationModal';
 import { GoAmlReportGenerator } from '@/lib/services/goaml-generator';
 import { AiCopilotService, ForensicDossierResult } from '@/lib/services/ai-copilot';
+import {
+  FinacleCoreConnector,
+  FinacleFreezeRequest,
+  FinacleResponseEnvelope,
+} from '@/lib/services/finacle-envelope';
+import {
+  NfiuConnectClient,
+  NfiuSubmissionPackage,
+  NfiuSubmissionReceipt,
+} from '@/lib/services/nfiu-connect';
 import { investigationStore } from '@/lib/storage/investigation-store';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,6 +39,8 @@ import {
   Cpu,
   Copy,
   Check,
+  Send,
+  Building2,
 } from 'lucide-react';
 
 export const InvestigationWorkbench: React.FC = () => {
@@ -51,21 +64,31 @@ export const InvestigationWorkbench: React.FC = () => {
   const [frozenAccountIds, setFrozenAccountIds] = useState<Set<string>>(new Set());
   const [finacleModalOpen, setFinacleModalOpen] = useState(false);
   const [activeFinaclePayload, setActiveFinaclePayload] = useState<Record<string, unknown> | null>(null);
+  const [finacleModalTab, setFinacleModalTab] = useState<'envelope' | 'response' | 'json'>('envelope');
+  const [finacleEnvelopeXml, setFinacleEnvelopeXml] = useState<string>('');
+  const [finacleHostResponse, setFinacleHostResponse] = useState<FinacleResponseEnvelope | null>(null);
+  const [finacleCopied, setFinacleCopied] = useState<boolean>(false);
 
   // Grounded GenAI Copilot State
   const [aiDossier, setAiDossier] = useState<ForensicDossierResult | null>(null);
   const [isSynthesizingAi, setIsSynthesizingAi] = useState(false);
 
-  // goAML XML Modal State
+  // goAML XML & NFIU B2B Submission State
   const [goAmlModalOpen, setGoAmlModalOpen] = useState(false);
   const [currentGoAmlXml, setCurrentGoAmlXml] = useState<string>('');
   const [xmlCopied, setXmlCopied] = useState(false);
+  const [nfiuPackage, setNfiuPackage] = useState<NfiuSubmissionPackage | null>(null);
+  const [nfiuReceipt, setNfiuReceipt] = useState<NfiuSubmissionReceipt | null>(null);
+  const [isTransmittingNfiu, setIsTransmittingNfiu] = useState(false);
 
   // Inspector Sub-Tab: 'ai' | 'metrics' | 'risk'
   const [inspectorTab, setInspectorTab] = useState<'ai' | 'metrics' | 'risk'>('ai');
 
-  // UI modal states
+  // UI Ingestion modal states (ISO 20022 pacs.008 + CSV)
   const [csvModalOpen, setCsvModalOpen] = useState(false);
+  const [ingestTab, setIngestTab] = useState<'iso20022' | 'csv'>('iso20022');
+  const [isoXmlInputText, setIsoXmlInputText] = useState('');
+  const [isoError, setIsoError] = useState<string | null>(null);
   const [csvInputText, setCsvInputText] = useState('');
   const [csvError, setCsvError] = useState<string | null>(null);
   const [pndStatus, setPndStatus] = useState<string | null>(null);
@@ -179,6 +202,42 @@ export const InvestigationWorkbench: React.FC = () => {
     setFrozenAccountIds(new Set());
   };
 
+  // Handle ISO 20022 pacs.008 XML Import
+  const handleImportIso20022 = () => {
+    if (!isoXmlInputText.trim()) {
+      setIsoError('Please paste or load a valid ISO 20022 pacs.008 XML clearing payload.');
+      return;
+    }
+    const { records, error } = Iso20022Parser.parsePacs008(isoXmlInputText);
+    if (error || records.length === 0) {
+      setIsoError(error || 'No valid credit transfer transactions found in XML.');
+      return;
+    }
+    setTransactions(records);
+    setSelectedDatasetId('iso20022-clearing');
+    setCsvModalOpen(false);
+    setIsoXmlInputText('');
+    setIsoError(null);
+    setSelectedNode(null);
+    setSelectedCluster(null);
+    setAiDossier(null);
+    setFrozenAccountIds(new Set());
+    investigationStore.logAuditAction({
+      action: 'INGEST_ISO20022',
+      targetEntityId: 'CLEARING_BATCH',
+      details: `Ingested ${records.length} pacs.008 interbank clearing records`,
+      officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+    });
+    setPndStatus(`Loaded ${records.length} ISO 20022 clearing records into bipartite graph.`);
+  };
+
+  // Quick-load sample ISO 20022 pacs.008 XML
+  const handleLoadSampleIso = () => {
+    const sample = Iso20022Parser.generateSamplePacs008();
+    setIsoXmlInputText(sample);
+    setIsoError(null);
+  };
+
   // Handle Sample CSV Download
   const handleDownloadSampleCsv = () => {
     const csvContent = CsvTransactionParser.generateSampleCsv();
@@ -238,6 +297,8 @@ export const InvestigationWorkbench: React.FC = () => {
       return next;
     });
 
+    const primaryAccount = targetAccountIds[0] || '2081940192';
+
     // Persist to IndexedDB and record auditable compliance action
     targetAccountIds.forEach((id) => {
       investigationStore.saveFrozenAccount({
@@ -257,16 +318,30 @@ export const InvestigationWorkbench: React.FC = () => {
       });
     });
 
+    // Generate Official Infosys Finacle FI XML SOAP Request
+    const freezeReq: FinacleFreezeRequest = {
+      accountNumber: primaryAccount,
+      reasonCode: '08',
+      reasonDescription: 'CBN AML/CFT 2022 - SUSPECTED MONEY MULE RING',
+      caseReference: targetCluster?.id || 'CASE-CBN-AML-2026',
+      initiatorOfficer: 'ZENITH_AML_INVESTIGATOR_L2',
+      freezeType: 'TOTAL_PND',
+    };
+
+    const envelopeXml = FinacleCoreConnector.buildModifyAccountFreezeXml(freezeReq);
+    const hostResponse = FinacleCoreConnector.simulateHostExecution(freezeReq);
+
     const payload = {
       service: 'Finacle_FI_ModifyAccountFreeze',
       requestHeader: {
         bankId: '057',
         channel: 'FININT_AML_FRAUD_DESK',
-        transactionId: `FI-PND-${Date.now().toString(36).toUpperCase()}`,
+        transactionId: hostResponse.hostTransactionId,
         timestamp: new Date().toISOString(),
       },
       freezeDetails: {
         accountNumbers: targetAccountIds,
+        primaryAccount,
         freezeType: 'TOTAL_PND',
         freezeReasonCode: '08',
         freezeReasonDescription: 'CBN AML/CFT 2022 - SUSPECTED MONEY MULE RING',
@@ -276,6 +351,9 @@ export const InvestigationWorkbench: React.FC = () => {
     };
 
     setActiveFinaclePayload(payload);
+    setFinacleEnvelopeXml(envelopeXml);
+    setFinacleHostResponse(hostResponse);
+    setFinacleModalTab('envelope');
     setFinacleModalOpen(true);
     setPndStatus(`Finacle Core API: Post-No-Debit (PND) hold placed on ${targetAccountIds.length} accounts.`);
   };
@@ -316,7 +394,36 @@ export const InvestigationWorkbench: React.FC = () => {
     });
 
     setCurrentGoAmlXml(xml);
+    setNfiuReceipt(null);
+    setNfiuPackage(null);
     setGoAmlModalOpen(true);
+  };
+
+  // Transmit SAR to NFIU via B2B WebService Direct Connect
+  const handleTransmitNfiu = async () => {
+    if (!currentGoAmlXml) return;
+    setIsTransmittingNfiu(true);
+    try {
+      const primaryCluster = selectedCluster || detectionResults.clusters[0];
+      const totalExposure = primaryCluster?.totalExposure || 18500000;
+      const pkg = await NfiuConnectClient.createSubmissionPackage({
+        xmlPayload: currentGoAmlXml,
+        caseReference: primaryCluster?.id || 'SAR-2026-NFIU',
+        totalTransactionsCount: transactions.length,
+        totalExposureNgn: totalExposure,
+      });
+      const receipt = NfiuConnectClient.generateTransmissionReceipt(pkg);
+      setNfiuPackage(pkg);
+      setNfiuReceipt(receipt);
+      investigationStore.logAuditAction({
+        action: 'NFIU_TRANSMISSION',
+        targetEntityId: receipt.receiptNumber,
+        details: `Transmitted goAML SAR Package ${pkg.packageId} to NFIU. Batch: ${receipt.nfiuBatchId}, SHA-256: ${pkg.sha256XmlDigest}`,
+        officerId: 'ZENITH_AML_INVESTIGATOR_L2',
+      });
+    } finally {
+      setIsTransmittingNfiu(false);
+    }
   };
 
   const handleDownloadXmlFile = () => {
@@ -411,11 +518,14 @@ export const InvestigationWorkbench: React.FC = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCsvModalOpen(true)}
+              onClick={() => {
+                setIngestTab('iso20022');
+                setCsvModalOpen(true);
+              }}
               className="gap-1.5 text-xs border-signal/40 text-signal hover:bg-signal/10"
             >
               <Upload className="size-3.5" />
-              <span>Upload CSV</span>
+              <span>Ingest (ISO 20022 / CSV)</span>
             </Button>
             <Button
               variant={isStreaming ? 'destructive' : 'default'}
@@ -460,6 +570,11 @@ export const InvestigationWorkbench: React.FC = () => {
           {selectedDatasetId === 'custom-csv' && (
             <Badge variant="signal" className="font-mono text-xs">
               Custom CSV Active ({transactions.length} txns)
+            </Badge>
+          )}
+          {selectedDatasetId === 'iso20022-clearing' && (
+            <Badge variant="signal" className="font-mono text-xs">
+              ISO 20022 pacs.008 Clearing Batch ({transactions.length} txns)
             </Badge>
           )}
         </div>
@@ -829,41 +944,154 @@ export const InvestigationWorkbench: React.FC = () => {
         </div>
       </div>
 
-      {/* Finacle Core Banking API Payload Inspector Modal */}
+      {/* Finacle Core Banking FI XML SOAP Gateway Modal */}
       {finacleModalOpen && activeFinaclePayload && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
         >
-          <div className="bg-canvas-raised border border-border-medium rounded-2xl w-full max-w-xl p-6 shadow-2xl flex flex-col gap-4 text-xs">
+          <div className="bg-canvas-raised border border-border-medium rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col gap-4 text-xs">
             <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
-              <div className="flex items-center gap-2">
-                <Lock className="size-4 text-risk" />
-                <h4 className="font-heading font-bold text-sm text-text-primary">
-                  Finacle Core Banking — PND Execution Payload
-                </h4>
+              <div className="flex items-center gap-2.5">
+                <div className="size-8 rounded-lg bg-risk/15 border border-risk/30 flex items-center justify-center text-risk">
+                  <Building2 className="size-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-heading font-bold text-sm text-text-primary">
+                      Infosys Finacle 11.0 FI SOAP Gateway
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-verified/15 text-verified border border-verified/30 font-semibold">
+                      Zenith Bank (057)
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-text-muted">
+                    Service: FI_ModifyAccountFreeze • Reason Code: 08 (CBN AML/CFT 2022)
+                  </span>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setFinacleModalOpen(false)}
-                className="text-text-muted hover:text-text-primary font-mono text-sm"
-              >
-                ✕
-              </button>
+
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-lg p-0.5 bg-canvas border border-border-subtle text-[11px] font-mono">
+                  <button
+                    type="button"
+                    onClick={() => setFinacleModalTab('envelope')}
+                    className={`px-2.5 py-1 rounded transition-colors ${
+                      finacleModalTab === 'envelope'
+                        ? 'bg-canvas-raised text-signal font-semibold shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    1. FI SOAP Envelope
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFinacleModalTab('response')}
+                    className={`px-2.5 py-1 rounded transition-colors ${
+                      finacleModalTab === 'response'
+                        ? 'bg-canvas-raised text-signal font-semibold shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    2. Host Response (00)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFinacleModalTab('json')}
+                    className={`px-2.5 py-1 rounded transition-colors ${
+                      finacleModalTab === 'json'
+                        ? 'bg-canvas-raised text-signal font-semibold shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    3. JSON REST
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFinacleModalOpen(false)}
+                  className="text-text-muted hover:text-text-primary font-mono text-sm p-1"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
-            <p className="text-text-secondary leading-relaxed">
-              Live Finacle API request dispatched via Zenith Core Banking Gateway. Reason Code{' '}
-              <code className="text-signal font-mono font-bold">08 (AML/CFT SUSPICIOUS ACTIVITY)</code>.
-              Outbound fund routing from targeted accounts has been immediately frozen.
-            </p>
+            {finacleModalTab === 'envelope' && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-canvas border border-border-subtle text-text-secondary leading-relaxed flex items-start gap-2">
+                  <Lock className="size-4 text-risk shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-text-primary font-semibold block">Statutory PND Authority:</span>
+                    CBN AML/CFT Regulations 2022 §19.4. Outbound clearing and NIP settlement immediately restricted on target accounts.
+                  </div>
+                </div>
+                <pre className="p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-[10px] text-text-primary overflow-x-auto max-h-64 leading-relaxed">
+                  {finacleEnvelopeXml}
+                </pre>
+              </div>
+            )}
 
-            <pre className="p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-[11px] text-text-primary overflow-x-auto max-h-56">
-              {JSON.stringify(activeFinaclePayload, null, 2)}
-            </pre>
+            {finacleModalTab === 'response' && finacleHostResponse && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-xl bg-canvas border border-border-medium space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-border-subtle">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="size-4 text-verified" />
+                      <span className="font-heading font-bold text-text-primary text-xs">
+                        Finacle Host Execution Confirmation
+                      </span>
+                    </div>
+                    <Badge variant="default" className="font-mono text-[10px]">
+                      RESPONSE CODE: {finacleHostResponse.responseCode} (SUCCESS)
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 font-mono text-xs">
+                    <div className="p-2.5 rounded-lg bg-canvas-raised border border-border-subtle">
+                      <span className="text-[10px] text-text-muted block">Host Tx ID</span>
+                      <span className="font-semibold text-text-primary truncate block mt-0.5">
+                        {finacleHostResponse.hostTransactionId}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-canvas-raised border border-border-subtle">
+                      <span className="text-[10px] text-text-muted block">Restriction Applied</span>
+                      <span className="font-bold text-risk block mt-0.5">TOTAL_PND</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-canvas-raised border border-border-subtle">
+                      <span className="text-[10px] text-text-muted block">Execution Timestamp</span>
+                      <span className="text-text-primary text-[11px] truncate block mt-0.5">
+                        {finacleHostResponse.timestamp}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <pre className="p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-[10px] text-text-primary overflow-x-auto max-h-48 leading-relaxed">
+                  {finacleHostResponse.rawXml}
+                </pre>
+              </div>
+            )}
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            {finacleModalTab === 'json' && (
+              <pre className="p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-[11px] text-text-primary overflow-x-auto max-h-64">
+                {JSON.stringify(activeFinaclePayload, null, 2)}
+              </pre>
+            )}
+
+            <div className="flex items-center justify-between pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(finacleEnvelopeXml);
+                  setFinacleCopied(true);
+                  setTimeout(() => setFinacleCopied(false), 2000);
+                }}
+                className="gap-1.5 font-mono text-xs"
+              >
+                {finacleCopied ? <Check className="size-3 text-verified" /> : <Copy className="size-3" />}
+                <span>{finacleCopied ? 'SOAP Copied!' : 'Copy SOAP XML'}</span>
+              </Button>
               <Button variant="default" size="sm" onClick={() => setFinacleModalOpen(false)}>
                 Acknowledge & Close
               </Button>
@@ -872,7 +1100,7 @@ export const InvestigationWorkbench: React.FC = () => {
         </div>
       )}
 
-      {/* goAML XML Report Viewer & Downloader Modal */}
+      {/* goAML XML Report & NFIU B2B Direct Connect Modal */}
       {goAmlModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
@@ -901,18 +1129,65 @@ export const InvestigationWorkbench: React.FC = () => {
               </button>
             </div>
 
-            <pre className="p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-[10px] text-text-primary overflow-x-auto max-h-72 leading-relaxed">
+            {/* NFIU Transmission Receipt Card */}
+            {nfiuReceipt && nfiuPackage && (
+              <div className="p-4 rounded-xl bg-canvas border border-verified/40 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-border-subtle">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="size-4 text-verified" />
+                    <span className="font-heading font-bold text-xs text-text-primary">
+                      NFIU B2B WebService Direct Connect Receipt
+                    </span>
+                  </div>
+                  <Badge variant="default" className="font-mono text-[10px]">
+                    200 OK • ACK PROCESSED
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-xs">
+                  <div className="p-2 rounded-lg bg-canvas-raised border border-border-subtle">
+                    <span className="text-[10px] text-text-muted block">Receipt Number</span>
+                    <span className="font-bold text-signal block truncate mt-0.5">{nfiuReceipt.receiptNumber}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-canvas-raised border border-border-subtle">
+                    <span className="text-[10px] text-text-muted block">NFIU Batch ID</span>
+                    <span className="font-semibold text-text-primary block truncate mt-0.5">{nfiuReceipt.nfiuBatchId}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-canvas-raised border border-border-subtle">
+                    <span className="text-[10px] text-text-muted block">Reporting Institution</span>
+                    <span className="font-semibold text-verified block truncate mt-0.5">{nfiuReceipt.reportingEntity}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-canvas-raised border border-border-subtle">
+                    <span className="text-[10px] text-text-muted block">SHA-256 Digest</span>
+                    <span className="text-[10px] text-text-muted font-mono block truncate mt-0.5" title={nfiuPackage.sha256XmlDigest}>
+                      {nfiuPackage.sha256XmlDigest.slice(0, 14)}...
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-text-secondary leading-relaxed bg-canvas-raised p-2.5 rounded-lg border border-border-subtle">
+                  {nfiuReceipt.auditMessage}
+                </p>
+              </div>
+            )}
+
+            <pre className="p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-[10px] text-text-primary overflow-x-auto max-h-64 leading-relaxed">
               {currentGoAmlXml}
             </pre>
 
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
               <Button variant="outline" size="sm" onClick={handleCopyXml} className="gap-1.5 font-mono text-xs">
                 {xmlCopied ? <Check className="size-3 text-verified" /> : <Copy className="size-3" />}
                 <span>{xmlCopied ? 'Copied to Clipboard!' : 'Copy XML'}</span>
               </Button>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setGoAmlModalOpen(false)}>
-                  Close
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTransmitNfiu}
+                  disabled={isTransmittingNfiu || Boolean(nfiuReceipt)}
+                  className="gap-1.5 border-signal/40 text-signal hover:bg-signal/10"
+                >
+                  <Send className="size-3.5" />
+                  <span>{isTransmittingNfiu ? 'Connecting to NFIU...' : nfiuReceipt ? 'Submitted to NFIU' : 'Transmit via NFIU B2B'}</span>
                 </Button>
                 <Button variant="default" size="sm" onClick={handleDownloadXmlFile} className="gap-1.5">
                   <Download className="size-3.5" />
@@ -924,59 +1199,146 @@ export const InvestigationWorkbench: React.FC = () => {
         </div>
       )}
 
-      {/* CSV Ingestion Modal */}
+      {/* Clearing Telemetry Ingestion Modal (ISO 20022 XML & CSV) */}
       {csvModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
         >
-          <div className="bg-canvas-raised border border-border-medium rounded-2xl w-full max-w-xl p-6 shadow-2xl flex flex-col gap-4 text-xs">
+          <div className="bg-canvas-raised border border-border-medium rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col gap-4 text-xs">
             <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
               <div className="flex items-center gap-2">
                 <Layers className="size-4 text-signal" />
-                <h4 className="font-heading font-bold text-sm text-text-primary">
-                  Upload Custom Transaction CSV
-                </h4>
+                <div>
+                  <h4 className="font-heading font-bold text-sm text-text-primary">
+                    Ingest Clearing Transactions
+                  </h4>
+                  <span className="text-[10px] font-mono text-text-muted">
+                    Supports ISO 20022 pacs.008 clearing messages & raw CSV files
+                  </span>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setCsvModalOpen(false)}
-                className="text-text-muted hover:text-text-primary font-mono text-sm"
-              >
-                ✕
-              </button>
+
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-lg p-0.5 bg-canvas border border-border-subtle text-[11px] font-mono">
+                  <button
+                    type="button"
+                    onClick={() => setIngestTab('iso20022')}
+                    className={`px-3 py-1 rounded transition-colors ${
+                      ingestTab === 'iso20022'
+                        ? 'bg-canvas-raised text-signal font-semibold shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    1. ISO 20022 pacs.008 XML
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIngestTab('csv')}
+                    className={`px-3 py-1 rounded transition-colors ${
+                      ingestTab === 'csv'
+                        ? 'bg-canvas-raised text-signal font-semibold shadow-sm'
+                        : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    2. Raw CSV
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCsvModalOpen(false)}
+                  className="text-text-muted hover:text-text-primary font-mono text-sm p-1"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
-            <p className="text-text-secondary leading-relaxed">
-              Paste transaction rows below or click &quot;Sample CSV&quot; to inspect required format.
-              Expected columns:{' '}
-              <code className="text-signal font-mono">
-                source_account, target_account, amount, [rail, device_id, bvn]
-              </code>
-            </p>
+            {ingestTab === 'iso20022' ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-canvas border border-border-subtle">
+                  <p className="text-text-secondary leading-relaxed text-xs">
+                    NIBSS Instant Payment (NIP) / RTGS interbank clearing specification (<code className="text-signal font-mono">pacs.008.001.08</code>).
+                    Parses <code className="text-signal font-mono">&lt;CdtTrfTxInf&gt;</code> blocks, settlement amounts, and supplementary BVN envelopes.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadSampleIso}
+                    className="shrink-0 text-xs font-mono border-signal/30 text-signal hover:bg-signal/10"
+                  >
+                    Load Sample XML
+                  </Button>
+                </div>
 
-            <textarea
-              value={csvInputText}
-              onChange={(e) => setCsvInputText(e.target.value)}
-              placeholder={`source_account,target_account,amount,payment_rail,device_id\nACC-001,ACC-002,4500000,NIP,DEV-01\nACC-002,ACC-003,4200000,NIP,DEV-01\nACC-003,ACC-001,3900000,NIP,DEV-01`}
-              className="w-full h-44 p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-signal resize-none"
-            />
+                <textarea
+                  value={isoXmlInputText}
+                  onChange={(e) => setIsoXmlInputText(e.target.value)}
+                  placeholder={`<?xml version="1.0" encoding="UTF-8"?>\n<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">\n  <FIToFICstmrCdtTrf>\n    <GrpHdr>...</GrpHdr>\n    <CdtTrfTxInf>...</CdtTrfTxInf>\n  </FIToFICstmrCdtTrf>\n</Document>`}
+                  className="w-full h-52 p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-signal resize-none"
+                />
 
-            {csvError && (
-              <div className="p-2.5 rounded-lg bg-risk/10 border border-risk/30 text-risk font-mono text-[11px]">
-                {csvError}
+                {isoError && (
+                  <div className="p-2.5 rounded-lg bg-risk/10 border border-risk/30 text-risk font-mono text-[11px]">
+                    {isoError}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <Button variant="outline" size="sm" onClick={() => setCsvModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="default" size="sm" onClick={handleImportIso20022}>
+                    Ingest ISO 20022 Batch
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-canvas border border-border-subtle">
+                  <p className="text-text-secondary leading-relaxed text-xs">
+                    Paste transaction rows below. Expected columns:{' '}
+                    <code className="text-signal font-mono">
+                      source_account, target_account, amount, [rail, device_id, bvn]
+                    </code>
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setCsvInputText(CsvTransactionParser.generateSampleCsv());
+                      setCsvError(null);
+                    }}
+                    className="shrink-0 text-xs font-mono border-signal/30 text-signal hover:bg-signal/10"
+                  >
+                    Load Sample CSV
+                  </Button>
+                </div>
+
+                <textarea
+                  value={csvInputText}
+                  onChange={(e) => setCsvInputText(e.target.value)}
+                  placeholder={`source_account,target_account,amount,payment_rail,device_id\nACC-001,ACC-002,4500000,NIP,DEV-01\nACC-002,ACC-003,4200000,NIP,DEV-01\nACC-003,ACC-001,3900000,NIP,DEV-01`}
+                  className="w-full h-52 p-3 bg-canvas border border-border-subtle rounded-xl font-mono text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-signal resize-none"
+                />
+
+                {csvError && (
+                  <div className="p-2.5 rounded-lg bg-risk/10 border border-risk/30 text-risk font-mono text-[11px]">
+                    {csvError}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <Button variant="outline" size="sm" onClick={() => setCsvModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="default" size="sm" onClick={handleImportCsv}>
+                    Run Graph Analysis
+                  </Button>
+                </div>
               </div>
             )}
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setCsvModalOpen(false)}>
-                Cancel
-              </Button>
-              <Button variant="default" size="sm" onClick={handleImportCsv}>
-                Run Graph Analysis
-              </Button>
-            </div>
           </div>
         </div>
       )}

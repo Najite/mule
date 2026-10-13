@@ -53,6 +53,7 @@ export class BankingService {
     try {
       const response = await fetch('https://api.paystack.co/bank?country=nigeria&perPage=50', {
         headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(2000),
       });
 
       if (!response.ok) {
