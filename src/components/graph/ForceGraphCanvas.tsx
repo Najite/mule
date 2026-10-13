@@ -637,13 +637,33 @@ export const ForceGraphCanvas: React.FC<ForceGraphCanvasProps> = ({
         ref={canvasRef}
         width={1400}
         height={900}
+        role="img"
+        aria-label={`Interactive financial network graph with ${filteredNodes.length} active nodes and ${edges.length} payment paths.`}
+        tabIndex={0}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        className="w-full h-full cursor-crosshair block"
+        className="w-full h-full cursor-crosshair block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
       />
+
+      {/* Accessible Screen Reader Entity Navigation (better-accessibility) */}
+      <div className="sr-only" aria-live="polite">
+        <p>
+          Financial Intelligence Graph contains {filteredNodes.length} entities.
+          {selectedNodeId ? ` Selected entity: ${selectedNodeId}.` : ' No entity selected.'}
+        </p>
+        <ul>
+          {filteredNodes.slice(0, 10).map((n) => (
+            <li key={n.id}>
+              <button onClick={() => onSelectNode(n)}>
+                Select {n.type} {n.label} with risk score {n.riskScore}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       {/* TOP FLOATING CONTROLS: Layout Switcher & View Tools */}
       <div className="absolute top-4 right-4 flex items-center gap-2 bg-[#0B0F17]/90 backdrop-blur-md p-1.5 rounded-lg border border-[#1E293B] shadow-xl z-10 font-mono text-xs">

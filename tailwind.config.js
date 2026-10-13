@@ -8,6 +8,38 @@ export default {
   theme: {
     extend: {
       colors: {
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        ring: 'hsl(var(--ring))',
+        input: 'hsl(var(--input))',
         canvas: {
           DEFAULT: '#08090C',
           subtle: '#0D0F15',
@@ -31,6 +63,7 @@ export default {
           subtle: 'rgba(16, 185, 129, 0.12)',
         },
         border: {
+          DEFAULT: 'hsl(var(--border))',
           subtle: 'rgba(255, 255, 255, 0.08)',
           medium: 'rgba(255, 255, 255, 0.16)',
           strong: 'rgba(255, 255, 255, 0.24)',
@@ -38,7 +71,7 @@ export default {
         text: {
           primary: '#F5F5F7',
           secondary: '#9BA3AF',
-          muted: '#6B7280',
+          muted: '#94A3B8',
         },
       },
       fontFamily: {

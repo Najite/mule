@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Menu, X, ArrowUpRight, Network } from 'lucide-react';
+import { Menu, X, Network } from 'lucide-react';
 
 interface NavbarProps {
   onOpenExplore: () => void;
   onOpenHowItWorks: () => void;
   onOpenBlueprint?: () => void;
   onLaunchPortal?: () => void;
+  onOpenBriefing?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -14,6 +15,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenHowItWorks,
   onOpenBlueprint,
   onLaunchPortal,
+  onOpenBriefing,
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -28,11 +30,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const navLinks = [
     { label: 'The Problem', href: '#problem' },
-    { label: 'The FININT Shift', href: '#shift' },
-    { label: 'Ring Intelligence', href: '#flagship' },
-    { label: 'Live Studio', href: '#workbench' },
+    { label: 'The Shift', href: '#shift' },
+    { label: 'Ring Intel', href: '#flagship' },
+    { label: 'Platform Preview', href: '#preview' },
     { label: 'Capabilities', href: '#capabilities' },
-    { label: 'Differentiation', href: '#differentiation' },
+    { label: 'ROI Model', href: '#roi-calculator' },
+    { label: 'FAQ', href: '#faq' },
   ];
 
   return (
@@ -74,7 +77,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <a
               key={link.href}
               href={link.href}
-              className="text-xs xl:text-sm font-medium text-text-secondary hover:text-text-primary px-3 py-1.5 rounded-md hover:bg-canvas-raised transition-colors"
+              className="text-xs xl:text-sm font-medium text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-md hover:bg-canvas-raised transition-colors whitespace-nowrap"
             >
               {link.label}
             </a>
@@ -82,50 +85,40 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Desktop Header Actions */}
-        <div className="hidden sm:flex items-center gap-3">
+        <div className="hidden sm:flex items-center gap-2.5 shrink-0">
+          {onOpenBriefing && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onOpenBriefing}
+              className="gap-1.5 border-border-medium hover:border-signal/50 text-xs font-mono whitespace-nowrap cursor-pointer"
+            >
+              <span>Book Briefing</span>
+            </Button>
+          )}
+
           {onLaunchPortal && (
             <Button
               variant="default"
               size="sm"
               onClick={onLaunchPortal}
-              className="gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-semibold shadow-md shadow-amber-500/20 border border-amber-400/40"
+              className="gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-semibold shadow-md shadow-amber-500/20 border border-amber-400/40 whitespace-nowrap cursor-pointer"
             >
               <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>Launch AML Portal</span>
-              <span className="text-[9px] font-mono uppercase bg-slate-950/40 text-amber-200 px-1.5 py-0.2 rounded">
-                Supabase Live
+              <span className="text-[9px] font-mono uppercase bg-slate-950/40 text-amber-200 px-1.5 py-0.2 rounded hidden xl:inline">
+                Live
               </span>
             </Button>
-          )}
-
-          {onOpenBlueprint && (
-            <button
-              type="button"
-              onClick={onOpenBlueprint}
-              className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono font-medium tracking-wide bg-signal/10 border border-signal/30 text-signal hover:bg-signal/20 transition-all cursor-pointer"
-              title="View Zenith Bank Zecathon 6.0 Track 6 Integration Blueprint"
-            >
-              <span className="size-1.5 rounded-full bg-signal animate-pulse" />
-              <span>Zecathon 6.0 Blueprint</span>
-            </button>
           )}
 
           <Button
             variant="ghost"
             size="sm"
             onClick={onOpenHowItWorks}
-            className="text-xs text-text-secondary hover:text-text-primary"
+            className="hidden 2xl:inline-flex text-xs text-text-secondary hover:text-text-primary whitespace-nowrap cursor-pointer"
           >
             See How It Works
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onOpenExplore}
-            className="gap-1.5 border-border-medium hover:border-signal/40 text-xs"
-          >
-            <span>Explore FININT</span>
-            <ArrowUpRight className="size-3.5" aria-hidden="true" />
           </Button>
         </div>
 
@@ -170,6 +163,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span>Launch AML Portal (Supabase Live)</span>
+              </Button>
+            )}
+            {onOpenBriefing && (
+              <Button
+                variant="outline"
+                className="w-full justify-center border-signal/40 text-signal font-mono text-xs"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenBriefing();
+                }}
+              >
+                Schedule Executive Briefing
               </Button>
             )}
             {onOpenBlueprint && (

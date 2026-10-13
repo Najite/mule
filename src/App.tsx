@@ -1,22 +1,65 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { HeroSection } from '@/components/HeroSection';
 import { ProblemSection } from '@/components/ProblemSection';
 import { FinintShiftSection } from '@/components/FinintShiftSection';
 import { FlagshipCapabilitySection } from '@/components/FlagshipCapabilitySection';
-import { InvestigationWorkbench } from '@/components/workbench/InvestigationWorkbench';
 import { ProductPreviewSection } from '@/components/ProductPreviewSection';
 import { CoreCapabilitiesSection } from '@/components/CoreCapabilitiesSection';
+import { RoiCalculatorSection } from '@/components/RoiCalculatorSection';
 import { DifferentiationSection } from '@/components/DifferentiationSection';
+import { FaqSection } from '@/components/FaqSection';
 import { FinalCtaSection } from '@/components/FinalCtaSection';
 import { Footer } from '@/components/Footer';
 import { InvestigationModal } from '@/components/InvestigationModal';
+import { DemoRequestModal } from '@/components/DemoRequestModal';
 import { FinintAppPortal } from '@/components/portal/FinintAppPortal';
 
 export const App: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'portal' | 'landing'>('portal');
+  const [viewMode, setViewMode] = useState<'portal' | 'landing'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('view') === 'portal' || window.location.hash === '#portal') {
+        return 'portal';
+      }
+    }
+    return 'landing';
+  });
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'explore' | 'flow' | 'blueprint'>('explore');
+  const [briefingOpen, setBriefingOpen] = useState(false);
+
+  const handleSwitchToPortal = () => {
+    setViewMode('portal');
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', 'portal');
+      window.history.pushState({ view: 'portal' }, '', url.toString());
+    }
+  };
+
+  const handleSwitchToLanding = () => {
+    setViewMode('landing');
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('view');
+      url.hash = '';
+      window.history.pushState({ view: 'landing' }, '', url.pathname);
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('view') === 'portal' || window.location.hash === '#portal') {
+        setViewMode('portal');
+      } else {
+        setViewMode('landing');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const handleOpenExplore = () => {
     setModalMode('explore');
@@ -34,7 +77,7 @@ export const App: React.FC = () => {
   };
 
   if (viewMode === 'portal') {
-    return <FinintAppPortal onSwitchToLanding={() => setViewMode('landing')} />;
+    return <FinintAppPortal onSwitchToLanding={handleSwitchToLanding} />;
   }
 
   return (
@@ -46,7 +89,7 @@ export const App: React.FC = () => {
           ZENITH BANK & NFIU REGULATORY TIER-1 ENFORCEMENT &bull; SUPABASE CLOUD ACTIVE
         </span>
         <button
-          onClick={() => setViewMode('portal')}
+          onClick={handleSwitchToPortal}
           className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
         >
           Launch AML Operations Portal &rarr;
@@ -66,7 +109,8 @@ export const App: React.FC = () => {
         onOpenExplore={handleOpenExplore}
         onOpenHowItWorks={handleOpenHowItWorks}
         onOpenBlueprint={handleOpenBlueprint}
-        onLaunchPortal={() => setViewMode('portal')}
+        onLaunchPortal={handleSwitchToPortal}
+        onOpenBriefing={() => setBriefingOpen(true)}
       />
 
       {/* Main Content Landmark */}
@@ -76,7 +120,8 @@ export const App: React.FC = () => {
           onOpenExplore={handleOpenExplore}
           onOpenHowItWorks={handleOpenHowItWorks}
           onOpenBlueprint={handleOpenBlueprint}
-          onLaunchPortal={() => setViewMode('portal')}
+          onLaunchPortal={handleSwitchToPortal}
+          onOpenBriefing={() => setBriefingOpen(true)}
         />
 
         {/* 2. Problem */}
@@ -88,22 +133,33 @@ export const App: React.FC = () => {
         {/* 4. Flagship Capability: Fraud Ring Intelligence */}
         <FlagshipCapabilitySection />
 
-        {/* 5. Live Functional Forensic Workbench */}
-        <InvestigationWorkbench />
+        {/* 5. Forensic Canvas Preview Showcase */}
+        <ProductPreviewSection
+          onOpenExplore={handleOpenExplore}
+          onLaunchPortal={handleSwitchToPortal}
+        />
 
-        {/* 6. Static Canvas Reference Preview */}
-        <ProductPreviewSection onOpenExplore={handleOpenExplore} />
-
-        {/* 7. Core Capabilities */}
+        {/* 6. Core Capabilities */}
         <CoreCapabilitiesSection />
+
+        {/* 7. Institutional Syndicate Loss & ROI Model */}
+        <RoiCalculatorSection
+          onOpenBriefing={() => setBriefingOpen(true)}
+          onLaunchPortal={handleSwitchToPortal}
+        />
 
         {/* 8. Differentiation */}
         <DifferentiationSection />
 
-        {/* 9. Final CTA */}
+        {/* 9. Institutional Architecture & Compliance FAQ */}
+        <FaqSection />
+
+        {/* 10. Final CTA */}
         <FinalCtaSection
           onOpenExplore={handleOpenExplore}
           onOpenHowItWorks={handleOpenHowItWorks}
+          onLaunchPortal={handleSwitchToPortal}
+          onOpenBriefing={() => setBriefingOpen(true)}
         />
       </main>
 
@@ -115,6 +171,16 @@ export const App: React.FC = () => {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         initialMode={modalMode}
+      />
+
+      {/* Executive Briefing & Live Sandbox Request Modal */}
+      <DemoRequestModal
+        isOpen={briefingOpen}
+        onClose={() => setBriefingOpen(false)}
+        onLaunchPortal={() => {
+          setBriefingOpen(false);
+          handleSwitchToPortal();
+        }}
       />
     </div>
   );

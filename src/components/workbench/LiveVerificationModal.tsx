@@ -73,6 +73,18 @@ export const LiveVerificationModal: React.FC<LiveVerificationModalProps> = ({
   const [sovereignResult, setSovereignResult] = useState<SovereignIpResult | null>(null);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
 
+  // Escape key close handler (better-accessibility)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   // Fetch real bank list on mount
   useEffect(() => {
     if (isOpen) {
@@ -124,7 +136,11 @@ export const LiveVerificationModal: React.FC<LiveVerificationModalProps> = ({
         setTargetIp(res.ip);
       }
     } catch (err: unknown) {
-      setTelemetryError(err instanceof Error ? err.message : 'Telemetry lookup failed');
+      setTelemetryError(
+        err instanceof Error
+          ? `${err.message}. Check IP formatting (e.g. 102.89.43.12) or switch to the Sovereign In-VPC Engine.`
+          : 'Telemetry lookup failed. Check your network connection or switch to the Sovereign In-VPC Engine.'
+      );
     } finally {
       setIsScanningIp(false);
     }

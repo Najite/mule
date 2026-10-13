@@ -5,11 +5,15 @@ import { ArrowRight, Network } from 'lucide-react';
 interface FinalCtaSectionProps {
   onOpenExplore: () => void;
   onOpenHowItWorks: () => void;
+  onLaunchPortal?: () => void;
+  onOpenBriefing?: () => void;
 }
 
 export const FinalCtaSection: React.FC<FinalCtaSectionProps> = ({
   onOpenExplore,
   onOpenHowItWorks,
+  onLaunchPortal,
+  onOpenBriefing,
 }) => {
   return (
     <section
@@ -49,23 +53,47 @@ export const FinalCtaSection: React.FC<FinalCtaSectionProps> = ({
           view of financial risk.
         </p>
 
-        {/* Dual Actions */}
+        {/* Actions */}
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <Button
-            size="lg"
-            variant="default"
-            onClick={onOpenExplore}
-            className="gap-2 text-base font-semibold px-8 shadow-xl shadow-signal/20"
-          >
-            <span>Explore FININT</span>
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Button>
+          {onLaunchPortal ? (
+            <Button
+              size="lg"
+              variant="default"
+              onClick={onLaunchPortal}
+              className="gap-2.5 text-base font-semibold px-8 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 shadow-xl shadow-amber-500/25 border border-amber-400/50 cursor-pointer"
+            >
+              <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Launch AML Operations Portal</span>
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              variant="default"
+              onClick={onOpenExplore}
+              className="gap-2 text-base font-semibold px-8 shadow-xl shadow-signal/20 cursor-pointer"
+            >
+              <span>Explore FININT</span>
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Button>
+          )}
+
+          {onOpenBriefing && (
+            <Button
+              size="lg"
+              variant="outline"
+              onClick={onOpenBriefing}
+              className="gap-2 text-base border-border-medium hover:border-signal/50 hover:bg-canvas-raised cursor-pointer"
+            >
+              <span>Schedule Executive Briefing</span>
+            </Button>
+          )}
 
           <Button
             size="lg"
             variant="outline"
             onClick={onOpenHowItWorks}
-            className="gap-2 text-base border-border-medium hover:bg-canvas-raised"
+            className="gap-2 text-base border-border-medium hover:bg-canvas-raised cursor-pointer"
           >
             <span>View the Investigation Flow</span>
           </Button>

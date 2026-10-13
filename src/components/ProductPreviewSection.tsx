@@ -9,14 +9,17 @@ import {
   CheckCircle2,
   Layers,
   Sparkles,
+  ArrowRight,
 } from 'lucide-react';
 
 interface ProductPreviewSectionProps {
   onOpenExplore: () => void;
+  onLaunchPortal?: () => void;
 }
 
 export const ProductPreviewSection: React.FC<ProductPreviewSectionProps> = ({
   onOpenExplore,
+  onLaunchPortal,
 }) => {
   const [activeNode, setActiveNode] = useState<'acc1' | 'acc2' | 'dev1' | 'hub'>('hub');
 
@@ -337,16 +340,28 @@ export const ProductPreviewSection: React.FC<ProductPreviewSectionProps> = ({
               </div>
 
               {/* Bottom Action Trigger */}
-              <div className="mt-6 pt-5 border-t border-border-subtle flex items-center justify-between">
+              <div className="mt-6 pt-5 border-t border-border-subtle flex flex-col sm:flex-row items-center gap-3">
                 <Button
-                  variant="default"
+                  variant="outline"
                   size="sm"
                   onClick={onOpenExplore}
-                  className="w-full justify-center gap-2"
+                  className="w-full sm:w-auto flex-1 justify-center gap-2 font-mono text-xs cursor-pointer hover:bg-canvas"
                 >
-                  <span>Open Full Investigation Dossier</span>
+                  <span>View Case Evidence Dossier</span>
                   <ExternalLink className="size-3.5" />
                 </Button>
+                {onLaunchPortal && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={onLaunchPortal}
+                    className="w-full sm:w-auto flex-1 justify-center gap-2 font-mono text-xs font-bold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 cursor-pointer shadow-md shadow-amber-500/20"
+                  >
+                    <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Launch Live Portal</span>
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                )}
               </div>
             </div>
           </div>

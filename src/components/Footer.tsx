@@ -49,6 +49,12 @@ export const Footer: React.FC = () => {
               <a href="#capabilities" className="text-text-muted hover:text-text-primary transition-colors">
                 Capabilities
               </a>
+              <a href="#roi-calculator" className="text-text-muted hover:text-text-primary transition-colors">
+                ROI Impact Model
+              </a>
+              <a href="#faq" className="text-text-muted hover:text-text-primary transition-colors">
+                Architecture FAQ
+              </a>
               <a href="#differentiation" className="text-text-muted hover:text-text-primary transition-colors">
                 Differentiation
               </a>

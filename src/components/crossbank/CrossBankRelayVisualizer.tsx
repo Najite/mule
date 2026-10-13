@@ -42,13 +42,12 @@ export const CrossBankRelayVisualizer: React.FC<CrossBankRelayVisualizerProps> =
   // 5: Consortium Interdiction & Dual PND Lockout
   const [currentStep, setCurrentStep] = useState<number>(5); // default to fully analyzed state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const timerRef = useRef<number | null>(null);
 
   // Auto playback loop
   useEffect(() => {
     if (isPlaying) {
-      const stepDuration = 2200 / playbackSpeed;
+      const stepDuration = 2200;
       timerRef.current = window.setInterval(() => {
         setCurrentStep((prev) => {
           if (prev >= 5) {
@@ -64,7 +63,7 @@ export const CrossBankRelayVisualizer: React.FC<CrossBankRelayVisualizerProps> =
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPlaying, playbackSpeed]);
+  }, [isPlaying]);
 
   const handleReset = () => {
     setIsPlaying(false);
@@ -100,43 +99,43 @@ export const CrossBankRelayVisualizer: React.FC<CrossBankRelayVisualizerProps> =
 
   const stepsDescriptions = [
     {
-      title: '1. Upstream Fund Inflow',
-      desc: `${formattedAmount} deposited into ${relay.sourceBankName} (${displaySourceAcc}) via NIP instant clearing.`,
+      title: '1. Inflow Settlement (Source Node)',
+      desc: `${formattedAmount} settled into ${relay.sourceBankName} (${displaySourceAcc}) via NIP instant clearing rails.`,
       activeNode: 'source',
       wireState: 'idle',
       deviceState: 'standby',
     },
     {
-      title: '2. Source App Authentication',
-      desc: `Physical Handset (${displayDevice}) logs into ${relay.sourceBankName} Mobile App from Lagos IP subnet (AS29465 MTN LTE).`,
+      title: '2. Physical Device Authentication',
+      desc: `Hardware token (${displayDevice}) authenticated into ${relay.sourceBankName} Mobile App via AS29465 Lagos LTE subnet.`,
       activeNode: 'source',
       wireState: 'source-armed',
       deviceState: 'source-linked',
     },
     {
-      title: '3. NIBSS NIP Wire Transit',
-      desc: `30-Digit NIP Session ID (${relay.nipSessionId.substring(0, 16)}...) dispatched across NIBSS central switch.`,
+      title: '3. NIBSS NIP Switch Transit',
+      desc: `30-Digit NIP Session ID (${relay.nipSessionId}) routed through NIBSS central settlement clearing switch.`,
       activeNode: 'nibss',
       wireState: 'in-transit',
       deviceState: 'relaying',
     },
     {
-      title: '4. Destination App Session Match',
-      desc: `Same handset (${displayDevice}) authenticates into ${relay.destinationBankName} app ${relay.deltaSeconds}s later. ThreatMetrix/NIBSS SDK correlates matching hardware hash.`,
+      title: '4. Destination App Session Handshake',
+      desc: `Identical physical handset (${displayDevice}) authenticated into ${relay.destinationBankName} app ${relay.deltaSeconds}s post-settlement. Consortium ThreatMetrix hash verified.`,
       activeNode: 'dest',
       wireState: 'settling',
       deviceState: 'dest-linked',
     },
     {
-      title: '5. Rapid Outflow / Smurfing Detected',
-      desc: `Immediate onward transfer attempted to POS/Crypto off-ramp within ${relay.deltaSeconds}s of settlement. Velocity exceeds ₦5M CTR limits.`,
+      title: '5. Rapid Outflow / Smurfing Intercept',
+      desc: `Immediate onward dispersion attempted to POS/Crypto off-ramp within ${relay.deltaSeconds}s. High-velocity pass-through flagged (>90% volume retention).`,
       activeNode: 'egress',
       wireState: 'outflow-flagged',
       deviceState: 'flagged',
     },
     {
-      title: '6. Inter-Institutional PND Interdiction',
-      desc: `NIBSS CFIS Category 08 broadcast triggered! Bilateral freeze directive issued simultaneously to ${relay.sourceBankName} & ${relay.destinationBankName}.`,
+      title: '6. Bilateral CFIS Interdiction Order',
+      desc: `NIBSS CFIS Category 08 broadcast triggered. Bilateral statutory PND freeze directives enforced on ${relay.sourceBankName} and ${relay.destinationBankName}.`,
       activeNode: 'locked',
       wireState: 'locked',
       deviceState: 'interdicted',
@@ -144,40 +143,49 @@ export const CrossBankRelayVisualizer: React.FC<CrossBankRelayVisualizerProps> =
   ];
 
   return (
-    <div className="rounded-2xl border border-amber-500/30 bg-[#0A0E17] shadow-2xl p-6 space-y-6 text-slate-200">
+    <div className="rounded-2xl border border-border-medium bg-[#0A0E17] shadow-2xl p-6 space-y-6 text-slate-200">
       
       {/* Header & Interception Summary */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#1E293B] pb-4">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+          <div className="p-2.5 rounded-xl bg-signal/10 border border-signal/30 text-signal">
             <Shuffle className="size-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base font-bold font-heading text-white">
-                Cross-Institutional Relay Pipeline Visualizer
+                Dual-Plane Forensic Telemetry & Interdiction Reconstruction
               </h3>
               <Badge variant="outline" className="border-red-500/40 text-red-400 bg-red-500/10 text-[10px] font-mono">
                 {relay.threatSeverity}
               </Badge>
             </div>
             <p className="text-xs font-mono text-slate-400">
-              RELAY ID: <span className="text-amber-400 font-bold">{relay.id}</span> | NIP SESSION:{' '}
+              RELAY ID: <span className="text-signal font-bold">{relay.id}</span> | NIP PACs.008 CLEARING BATCH:{' '}
               <span className="text-slate-300">{relay.nipSessionId}</span>
             </p>
           </div>
         </div>
 
-        {/* Player Controls */}
+        {/* Forensic Reconstruction Controls */}
         <div className="flex items-center gap-2 bg-[#0E131F] p-1.5 rounded-xl border border-[#1E293B]">
           <Button
             size="sm"
             variant="ghost"
             onClick={handlePlayToggle}
-            className="h-7 px-2.5 text-xs text-amber-400 hover:text-white hover:bg-white/5 font-mono gap-1"
+            className="h-7 px-2.5 text-xs text-signal hover:text-white hover:bg-white/5 font-mono gap-1"
           >
             {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-            <span>{isPlaying ? 'Pause' : currentStep >= 5 ? 'Replay' : 'Play Flow'}</span>
+            <span>{isPlaying ? 'Pause' : currentStep >= 5 ? 'Replay Sequence' : 'Reconstruct'}</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setCurrentStep(5)}
+            className="h-7 px-2.5 text-xs text-red-400 hover:text-white hover:bg-red-500/20 font-mono"
+            title="Jump directly to final interdiction verdict"
+          >
+            Verdict
           </Button>
           <Button
             size="sm"
@@ -188,51 +196,42 @@ export const CrossBankRelayVisualizer: React.FC<CrossBankRelayVisualizerProps> =
           >
             <RotateCcw className="size-3.5" />
           </Button>
-          <div className="flex items-center gap-1 border-l border-[#1E293B] pl-2 text-[10px] font-mono text-slate-400">
-            <span>Speed:</span>
-            {[1, 2].map((spd) => (
-              <button
-                key={spd}
-                type="button"
-                onClick={() => setPlaybackSpeed(spd)}
-                className={`px-1.5 py-0.5 rounded cursor-pointer ${
-                  playbackSpeed === spd ? 'bg-amber-500 text-slate-950 font-bold' : 'hover:text-white'
-                }`}
-              >
-                {spd}x
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
-      {/* Step Progress Bar */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-          <span className="text-amber-400 font-bold flex items-center gap-1">
-            <Clock className="size-3" /> Step {currentStep + 1} of 6: {stepsDescriptions[currentStep].title}
+      {/* Step Progress Bar & Phase Navigation */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-slate-400 gap-2">
+          <span className="text-signal font-bold flex items-center gap-1.5">
+            <Clock className="size-3.5" /> Investigation Phase {currentStep + 1} of 6: {stepsDescriptions[currentStep].title}
           </span>
-          <span className="text-slate-500">
-            Session Hop Delta: <strong className="text-red-400">{relay.deltaSeconds}s</strong>
-          </span>
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-slate-400">
+              Session Hop Delta: <strong className="text-red-400 tabular-nums">{relay.deltaSeconds}s</strong>
+            </span>
+            <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+              Pass-Through Smurfing Alert (&lt; 180s)
+            </span>
+          </div>
         </div>
-        <div className="grid grid-cols-6 gap-1.5 h-1.5">
+        <div className="grid grid-cols-6 gap-2 h-2">
           {stepsDescriptions.map((s, idx) => (
             <button
               key={s.title}
               type="button"
+              aria-label={`Jump to investigation phase ${idx + 1}: ${s.title}`}
               onClick={() => setCurrentStep(idx)}
-              className={`h-full rounded-full transition-all cursor-pointer ${
+              className={`h-full rounded-full transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal ${
                 idx <= currentStep
                   ? idx === 5
                     ? 'bg-red-500 shadow-sm shadow-red-500/50'
-                    : 'bg-amber-500 shadow-sm shadow-amber-500/50'
-                  : 'bg-[#1E293B]'
+                    : 'bg-signal shadow-sm shadow-signal/50'
+                  : 'bg-[#1E293B] hover:bg-[#334155]'
               }`}
             />
           ))}
         </div>
-        <p className="text-xs text-slate-300 font-sans pt-1">
+        <p className="text-xs text-slate-300 font-sans pt-1 leading-relaxed">
           {stepsDescriptions[currentStep].desc}
         </p>
       </div>

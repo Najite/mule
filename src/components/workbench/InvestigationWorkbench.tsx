@@ -114,6 +114,29 @@ export const InvestigationWorkbench: React.FC = () => {
     investigationStore.getAuditTrail().then((logs) => setAuditLogCount(logs.length));
   };
 
+  // Escape key close handler for all open modals (better-accessibility)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (finacleModalOpen) setFinacleModalOpen(false);
+        if (goAmlModalOpen) setGoAmlModalOpen(false);
+        if (csvModalOpen) setCsvModalOpen(false);
+        if (groqModalOpen) setGroqModalOpen(false);
+        if (verificationModalOpen) setVerificationModalOpen(false);
+        if (auditModalOpen) setAuditModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    finacleModalOpen,
+    goAmlModalOpen,
+    csvModalOpen,
+    groqModalOpen,
+    verificationModalOpen,
+    auditModalOpen,
+  ]);
+
   // Switch dataset handler
   const handleSelectDataset = (id: string) => {
     setSelectedDatasetId(id);
@@ -201,7 +224,7 @@ export const InvestigationWorkbench: React.FC = () => {
     if (!csvInputText.trim()) return;
     const { records, error } = CsvTransactionParser.parseCsv(csvInputText);
     if (error) {
-      setCsvError(error);
+      setCsvError(`${error}. Ensure your CSV includes columns: id, timestamp, sourceAccount, destinationAccount, amount, or load sample records.`);
       return;
     }
     setTransactions(records);
@@ -218,12 +241,12 @@ export const InvestigationWorkbench: React.FC = () => {
   // Handle ISO 20022 pacs.008 XML Import
   const handleImportIso20022 = () => {
     if (!isoXmlInputText.trim()) {
-      setIsoError('Please paste or load a valid ISO 20022 pacs.008 XML clearing payload.');
+      setIsoError('No XML payload detected. Paste an ISO 20022 pacs.008 XML payload, or click "Load Sample XML" above.');
       return;
     }
     const { records, error } = Iso20022Parser.parsePacs008(isoXmlInputText);
     if (error || records.length === 0) {
-      setIsoError(error || 'No valid credit transfer transactions found in XML.');
+      setIsoError(`${error || 'No valid credit transfer transactions found.'} Verify the XML contains <CdtTrfTxInf> blocks or use the provided sample.`);
       return;
     }
     setTransactions(records);
